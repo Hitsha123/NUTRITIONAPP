@@ -1,6 +1,6 @@
 [
   {
-    "code": "3017620425035",
+    "code": "3017624010701",
     "name": "Nutella",
     "calories": 539,
     "protein": 6.3,
@@ -18,7 +18,7 @@
     "image": "https://images.openfoodfacts.org/images/products/301/762/042/2003/front_en.633.400.jpg"
   },
   {
-    "code": "90162602",
+    "code": "9002490100070",
     "name": "Redbull",
     "calories": 46,
     "protein": 0,
@@ -45,7 +45,7 @@
     "image": "https://images.openfoodfacts.org/images/products/599/988/403/4469/front_en.61.400.jpg"
   },
   {
-    "code": "54491496",
+    "code": "5449000131836",
     "name": "diet coke 500ml",
     "calories": 0.4,
     "protein": 0,
@@ -261,7 +261,7 @@
     "image": "https://images.openfoodfacts.org/images/products/930/063/392/9169/front_en.27.400.jpg"
   },
   {
-    "code": "8901719128462",
+    "code": "8901719101038",
     "name": "Parle-G",
     "calories": 454,
     "protein": 6.9,
@@ -853,6 +853,24 @@
     "carbs": 53.4,
     "fats": 33.1,
     "image": "https://images.openfoodfacts.org/images/products/890/149/150/3020/front_en.25.400.jpg"
+  },
+  {
+    "code": "000000000000",
+    "name": "Sins KE BABLE KA DOODH",
+    "calories": 539,
+    "protein": 100.9,
+    "carbs": 0.4,
+    "fats": 33.1,
+    "image": "sins.jpeg"
+  },
+   {
+    "code": "11111111111",
+    "name": "SHARVA KE BABLE KA DOODH",
+    "calories": 539,
+    "protein": 100.9,
+    "carbs": 0.4,
+    "fats": 33.1,
+    "image": "sharva.jpeg"
   },
   {
     "code": "8908013982646",

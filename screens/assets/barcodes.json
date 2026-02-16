@@ -12,5 +12,23 @@
     "calories": 720,
     "protein": 1,
     "image": "parle_g.png"
+  },
+   {
+    "code": "000000000000",
+    "name": "Sins KE BABLE KA DOODH",
+    "calories": 539,
+    "protein": 100.9,
+    "carbs": 0.4,
+    "fats": 33.1,
+    "image": "sins.jpeg"
+  },
+   {
+    "code": "11111111111",
+    "name": "SHARVA KE BABLE KA DOODH",
+    "calories": 539,
+    "protein": 100.9,
+    "carbs": 0.4,
+    "fats": 33.1,
+    "image": "sharva.jpeg"
   }
 ]

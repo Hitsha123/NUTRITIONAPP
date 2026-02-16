@@ -3,6 +3,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { ActivityIndicator, View, StyleSheet } from 'react-native';
 import auth from '@react-native-firebase/auth';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
 // Screens
 import SplashScreen from './screens/SplashScreen';
@@ -20,6 +21,12 @@ import NotificationSettingsScreen from './screens/NotificationSettingsScreen';
 
 const Stack = createNativeStackNavigator();
 
+// ==================== CONFIGURE GOOGLE SIGN-IN ====================
+GoogleSignin.configure({
+  webClientId: '217520693624-s14nk9a0hb5m9c9kjr7m9818rmfaj91g.apps.googleusercontent.com',
+  offlineAccess: true,
+});
+
 export default function App() {
   const [initializing, setInitializing] = useState(true);
   const [user, setUser] = useState(null);
@@ -35,7 +42,7 @@ export default function App() {
   if (initializing) {
     return (
       <View style={styles.loading}>
-        <ActivityIndicator size="large" />
+        <ActivityIndicator size="large" color="#4CAF50" />
       </View>
     );
   }
@@ -76,5 +83,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#E8F5E9',
   },
 });
