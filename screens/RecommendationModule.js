@@ -190,7 +190,6 @@ export default function AnalyticsModule() {
   const appState = useRef(AppState.currentState);
   const checkIntervalRef = useRef(null);
 
-  // Load veg mode preference
   useEffect(() => {
     loadVegModePreference();
   }, []);
@@ -212,13 +211,12 @@ export default function AnalyticsModule() {
       setVegMode(newValue);
       await AsyncStorage.setItem(VEG_MODE_KEY, JSON.stringify(newValue));
       
-      // Show confirmation
       Alert.alert(
-        newValue ? "Veg Mode Enabled" : "All Foods Mode",
+        newValue ? "🌱 Veg Mode Enabled! 🎉" : "🍖 All Foods Mode Activated!",
         newValue 
-          ? "Now showing only vegetarian foods" 
-          : "Now showing all foods including non-vegetarian",
-        [{ text: "Got it!" }]
+          ? "✅ Now showing only vegetarian foods 🥦🥕🌽" 
+          : "🍗 Now showing all foods including non-vegetarian 🥩🐟",
+        [{ text: "👍 Got it!" }]
       );
     } catch (error) {
       console.error("Error saving veg mode preference:", error);
@@ -440,7 +438,7 @@ export default function AnalyticsModule() {
       await AsyncStorage.setItem(LAST_REFRESH_KEY, today.toISOString().split("T")[0]);
     } catch (e) {
       console.error(e);
-      Alert.alert("❌ Error", "Failed to load analytics data");
+      Alert.alert("❌ Error", "⚠️ Failed to load analytics data. Please try again!");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -466,21 +464,21 @@ export default function AnalyticsModule() {
   const getTips = () => {
     const tips = [];
     if (todayTotals.calories < GUIDELINES.calories.min)
-      tips.push({ icon: "alert", text: "Boost your calorie intake for more energy", color: "#F97316" });
+      tips.push({ icon: "alert", text: "⚡ Boost your calorie intake for more energy!", color: "#F97316" });
     else if (todayTotals.calories > GUIDELINES.calories.max)
-      tips.push({ icon: "alert", text: "Consider reducing portion sizes", color: "#EF4444" });
+      tips.push({ icon: "alert", text: "🍽️ Consider reducing portion sizes today", color: "#EF4444" });
     
     if (todayTotals.protein < GUIDELINES.protein.min)
-      tips.push({ icon: "food-drumstick", text: "Add lean protein to support muscle growth", color: "#F97316" });
+      tips.push({ icon: "food-drumstick", text: "💪 Add lean protein to support muscle growth", color: "#F97316" });
     
     if (todayTotals.carbs < GUIDELINES.carbs.min)
-      tips.push({ icon: "bread-slice", text: "Include whole grains for sustained energy", color: "#F97316" });
+      tips.push({ icon: "bread-slice", text: "🌾 Include whole grains for sustained energy", color: "#F97316" });
     
     if (todayTotals.fats < GUIDELINES.fats.min)
-      tips.push({ icon: "oil", text: "Add healthy fats like nuts and avocado", color: "#F97316" });
+      tips.push({ icon: "oil", text: "🥑 Add healthy fats like nuts and avocado", color: "#F97316" });
     
     if (tips.length === 0)
-      tips.push({ icon: "check-circle", text: "Excellent! Your nutrition is perfectly balanced", color: "#10B981" });
+      tips.push({ icon: "check-circle", text: "🎉 Excellent! Your nutrition is perfectly balanced!", color: "#10B981" });
     
     return tips;
   };
@@ -759,12 +757,12 @@ export default function AnalyticsModule() {
       await RNFS.writeFile(filePath, htmlContent, 'utf8');
 
       Alert.alert(
-        "✅ Export Successful!",
-        `📄 Your nutrition report has been saved!\n\n📁 Location: ${Platform.OS === 'android' ? 'Downloads' : 'Documents'} folder\n📝 File: ${fileName}`,
+        "✅ 🎉 Export Successful!",
+        `📄 Your nutrition report has been saved!\n\n📁 Location: ${Platform.OS === 'android' ? '📂 Downloads' : '📂 Documents'} folder\n📝 File: ${fileName}`,
         [
           { text: "👍 Great!" },
           {
-            text: "📤 Share Now",
+            text: "📤 Share Now 🚀",
             onPress: async () => {
               try {
                 await Share.share({
@@ -803,7 +801,7 @@ export default function AnalyticsModule() {
           `📈 Status: ${getTips()[0].text}\n\n` +
           `📊 7-Day Average:\n` +
           `🔥 ${weeklyAverage.calories} kcal | 💪 ${weeklyAverage.protein}g | 🍞 ${weeklyAverage.carbs}g | 🥑 ${weeklyAverage.fats}g\n\n` +
-          `✨ Keep up the great work! 💪`,
+          `✨ Keep up the great work! 💪🎉`,
       });
     } catch (e) {
       Alert.alert("❌ Share Error", e.message);
@@ -847,12 +845,12 @@ export default function AnalyticsModule() {
       await AsyncStorage.setItem("selectedFoods", JSON.stringify(meals));
 
       Alert.alert(
-        "✅ Success!",
-        `🎉 ${food.name} added to your meals!\n\n📊 Your nutrition totals have been updated.`,
+        "✅ 🎉 Added Successfully!",
+        `🍽️ ${food.name} added to your meals!\n\n📊 Your nutrition totals have been updated. 🚀`,
         [
           { text: "🔍 Keep Browsing", style: "cancel" },
           { 
-            text: "📊 View Dashboard", 
+            text: "📊 View Dashboard 🏠", 
             onPress: () => {
               setSelectedFood(null);
               setSelectedNutrient(null);
@@ -873,12 +871,10 @@ export default function AnalyticsModule() {
     
     let foods = FOOD_DATABASE[selectedNutrient] || [];
     
-    // Filter by veg mode
     if (vegMode) {
       foods = foods.filter(food => food.isVeg === true);
     }
     
-    // Filter by search query
     if (searchQuery) {
       foods = foods.filter(food =>
         food.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -894,7 +890,8 @@ export default function AnalyticsModule() {
         <StatusBar barStyle="dark-content" backgroundColor="#F9FAFB" />
         <View style={styles.centered}>
           <ActivityIndicator size="large" color="#10B981" />
-          <Text style={styles.loadingText}>⏳ Loading your nutrition data...</Text>
+          <Text style={styles.loadingText}>⏳ Loading your nutrition data... 📊</Text>
+          <Text style={styles.loadingSubtext}>🥗 Crunching those macros! 💪</Text>
         </View>
       </SafeAreaView>
     );
@@ -911,9 +908,10 @@ export default function AnalyticsModule() {
         <View style={styles.header}>
           <TouchableOpacity onPress={handleBack} style={styles.backButton}>
             <Icon name="arrow-left" size={24} color="#1F2937" />
+            <Text style={styles.backButtonText}>⬅️</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Food Details</Text>
-          <View style={{ width: 24 }} />
+          <Text style={styles.headerTitle}>🔍 Food Details</Text>
+          <View style={{ width: 40 }} />
         </View>
 
         <ScrollView contentContainerStyle={{ padding: 20 }}>
@@ -925,47 +923,51 @@ export default function AnalyticsModule() {
                 <Text style={styles.detailServing}>📏 Serving size: {selectedFood.serving}</Text>
                 {selectedFood.isVeg && (
                   <View style={styles.vegBadge}>
-                    <Text style={styles.vegBadgeText}>🌱 Vegetarian</Text>
+                    <Text style={styles.vegBadgeText}>🌱 Vegetarian Friendly</Text>
                   </View>
                 )}
               </View>
             </View>
 
-            <View style={styles.macroDetailGrid}>
-              <View style={[styles.macroDetailCard, { backgroundColor: "#FEE2E2", borderColor: "#EF4444" }]}>
-                <Text style={styles.macroDetailEmoji}>🔥</Text>
-                <Text style={styles.macroDetailLabel}>Calories</Text>
-                <Text style={[styles.macroDetailValue, { color: "#EF4444" }]}>
-                  {selectedFood.calories}
-                </Text>
-                <Text style={styles.macroDetailUnit}>kcal</Text>
-              </View>
+            {/* Nutrition Facts Box */}
+            <View style={styles.nutritionFactsBox}>
+              <Text style={styles.nutritionFactsTitle}>📋 Nutrition Facts</Text>
+              <View style={styles.macroDetailGrid}>
+                <View style={[styles.macroDetailCard, { backgroundColor: "#FEE2E2", borderColor: "#EF4444" }]}>
+                  <Text style={styles.macroDetailEmoji}>🔥</Text>
+                  <Text style={styles.macroDetailLabel}>Calories</Text>
+                  <Text style={[styles.macroDetailValue, { color: "#EF4444" }]}>
+                    {selectedFood.calories}
+                  </Text>
+                  <Text style={styles.macroDetailUnit}>kcal</Text>
+                </View>
 
-              <View style={[styles.macroDetailCard, { backgroundColor: "#EDE9FE", borderColor: "#8B5CF6" }]}>
-                <Text style={styles.macroDetailEmoji}>💪</Text>
-                <Text style={styles.macroDetailLabel}>Protein</Text>
-                <Text style={[styles.macroDetailValue, { color: "#8B5CF6" }]}>
-                  {selectedFood.protein}
-                </Text>
-                <Text style={styles.macroDetailUnit}>grams</Text>
-              </View>
+                <View style={[styles.macroDetailCard, { backgroundColor: "#EDE9FE", borderColor: "#8B5CF6" }]}>
+                  <Text style={styles.macroDetailEmoji}>💪</Text>
+                  <Text style={styles.macroDetailLabel}>Protein</Text>
+                  <Text style={[styles.macroDetailValue, { color: "#8B5CF6" }]}>
+                    {selectedFood.protein}
+                  </Text>
+                  <Text style={styles.macroDetailUnit}>grams</Text>
+                </View>
 
-              <View style={[styles.macroDetailCard, { backgroundColor: "#DBEAFE", borderColor: "#3B82F6" }]}>
-                <Text style={styles.macroDetailEmoji}>🍞</Text>
-                <Text style={styles.macroDetailLabel}>Carbs</Text>
-                <Text style={[styles.macroDetailValue, { color: "#3B82F6" }]}>
-                  {selectedFood.carbs}
-                </Text>
-                <Text style={styles.macroDetailUnit}>grams</Text>
-              </View>
+                <View style={[styles.macroDetailCard, { backgroundColor: "#DBEAFE", borderColor: "#3B82F6" }]}>
+                  <Text style={styles.macroDetailEmoji}>🍞</Text>
+                  <Text style={styles.macroDetailLabel}>Carbs</Text>
+                  <Text style={[styles.macroDetailValue, { color: "#3B82F6" }]}>
+                    {selectedFood.carbs}
+                  </Text>
+                  <Text style={styles.macroDetailUnit}>grams</Text>
+                </View>
 
-              <View style={[styles.macroDetailCard, { backgroundColor: "#FEF3C7", borderColor: "#F59E0B" }]}>
-                <Text style={styles.macroDetailEmoji}>🥑</Text>
-                <Text style={styles.macroDetailLabel}>Fats</Text>
-                <Text style={[styles.macroDetailValue, { color: "#F59E0B" }]}>
-                  {selectedFood.fats}
-                </Text>
-                <Text style={styles.macroDetailUnit}>grams</Text>
+                <View style={[styles.macroDetailCard, { backgroundColor: "#FEF3C7", borderColor: "#F59E0B" }]}>
+                  <Text style={styles.macroDetailEmoji}>🥑</Text>
+                  <Text style={styles.macroDetailLabel}>Fats</Text>
+                  <Text style={[styles.macroDetailValue, { color: "#F59E0B" }]}>
+                    {selectedFood.fats}
+                  </Text>
+                  <Text style={styles.macroDetailUnit}>grams</Text>
+                </View>
               </View>
             </View>
 
@@ -974,7 +976,7 @@ export default function AnalyticsModule() {
               onPress={() => handleAddFood(selectedFood)}
             >
               <Icon name="plus-circle" size={24} color="#fff" />
-              <Text style={styles.addButtonText}>✨ Add to My Meals</Text>
+              <Text style={styles.addButtonText}>✨ Add to My Meals 🍽️</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -1010,7 +1012,7 @@ export default function AnalyticsModule() {
             <View>
               <Text style={styles.vegModeTitle}>🥬 Vegetarian Mode</Text>
               <Text style={styles.vegModeSubtitle}>
-                {vegMode ? "✅ Only showing veg foods" : "🍖 Showing all foods"}
+                {vegMode ? "✅ Only showing 🌿 veg foods" : "🍖 Showing all foods"}
               </Text>
             </View>
           </View>
@@ -1019,18 +1021,19 @@ export default function AnalyticsModule() {
           </View>
         </TouchableOpacity>
 
+        {/* Search Box */}
         <View style={styles.searchContainer}>
-          <Icon name="magnify" size={20} color="#9CA3AF" style={styles.searchIcon} />
+          <Text style={styles.searchPrefixEmoji}>🔍</Text>
           <TextInput
             style={styles.searchInput}
-            placeholder="🔍 Search for foods..."
+            placeholder="Search for foods... 🥗"
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholderTextColor="#9CA3AF"
           />
           {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery("")}>
-              <Icon name="close-circle" size={20} color="#9CA3AF" />
+            <TouchableOpacity onPress={() => setSearchQuery("")} style={styles.clearSearchBtn}>
+              <Text style={styles.clearSearchEmoji}>❌</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -1038,8 +1041,8 @@ export default function AnalyticsModule() {
         <ScrollView contentContainerStyle={{ padding: 20 }}>
           <View style={[styles.infoBar, { backgroundColor: config.bgColor }]}>
             <Text style={[styles.infoText, { color: config.color }]}>
-              Found {filteredFoods.length} food{filteredFoods.length !== 1 ? 's' : ''}
-              {vegMode && " (Veg only)"}
+              🍽️ Found {filteredFoods.length} food{filteredFoods.length !== 1 ? 's' : ''}
+              {vegMode ? " 🌱 (Veg only)" : " 🍴 (All types)"}
             </Text>
           </View>
 
@@ -1067,7 +1070,7 @@ export default function AnalyticsModule() {
                 </View>
                 <View style={[styles.primaryNutrientBadge, { backgroundColor: config.color }]}>
                   <Text style={styles.primaryNutrientValue}>
-                    {food[selectedNutrient]}{selectedNutrient === "calories" ? "" : "g"}
+                    {food[selectedNutrient]}{selectedNutrient === "calories" ? " 🔥" : "g"}
                   </Text>
                 </View>
               </View>
@@ -1076,6 +1079,7 @@ export default function AnalyticsModule() {
                 <View style={styles.macroItem}>
                   <Text style={styles.macroLabel}>🔥</Text>
                   <Text style={styles.macroValue}>{food.calories}</Text>
+                  <Text style={styles.macroUnit}>kcal</Text>
                 </View>
                 <View style={styles.macroItem}>
                   <Text style={styles.macroLabel}>💪</Text>
@@ -1091,13 +1095,21 @@ export default function AnalyticsModule() {
                 </View>
               </View>
 
-              <TouchableOpacity
-                style={[styles.quickAddButton, { backgroundColor: config.bgColor }]}
-                onPress={() => handleAddFood(food)}
-              >
-                <Icon name="plus" size={18} color={config.color} />
-                <Text style={[styles.quickAddText, { color: config.color }]}>⚡ Quick Add to Meals</Text>
-              </TouchableOpacity>
+              <View style={styles.foodCardActions}>
+                <TouchableOpacity
+                  style={[styles.quickAddButton, { backgroundColor: config.bgColor, borderColor: config.color }]}
+                  onPress={() => handleAddFood(food)}
+                >
+                  <Text style={styles.quickAddEmoji}>➕</Text>
+                  <Text style={[styles.quickAddText, { color: config.color }]}>⚡ Quick Add to Meals</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.detailsButton, { backgroundColor: config.color }]}
+                  onPress={() => setSelectedFood(food)}
+                >
+                  <Text style={styles.detailsButtonText}>🔍</Text>
+                </TouchableOpacity>
+              </View>
             </TouchableOpacity>
           ))}
 
@@ -1105,12 +1117,12 @@ export default function AnalyticsModule() {
             <View style={styles.emptyState}>
               <Text style={styles.emptyEmoji}>{vegMode ? "🥬" : "🔍"}</Text>
               <Text style={styles.emptyText}>
-                {vegMode ? "No vegetarian foods found" : "No foods found"}
+                {vegMode ? "🌱 No vegetarian foods found" : "😕 No foods found"}
               </Text>
               <Text style={styles.emptySubtext}>
                 {vegMode 
-                  ? "Try turning off veg mode or searching differently" 
-                  : "Try a different search term"}
+                  ? "🔄 Try turning off veg mode or searching differently" 
+                  : "🔤 Try a different search term"}
               </Text>
             </View>
           )}
@@ -1139,13 +1151,13 @@ export default function AnalyticsModule() {
           <View style={styles.dashboardHeader}>
             <View>
               <Text style={styles.dashboardTitle}>🍎 Nutrition Dashboard</Text>
-              <Text style={styles.dashboardSubtitle}>📊 Track your daily macro intake</Text>
+              <Text style={styles.dashboardSubtitle}>📊 Track your daily macro intake 💪</Text>
             </View>
             <TouchableOpacity 
               onPress={onRefresh}
               style={styles.refreshButton}
             >
-              <Icon name="refresh" size={24} color="#10B981" />
+              <Text style={styles.refreshEmoji}>🔄</Text>
             </TouchableOpacity>
           </View>
 
@@ -1158,9 +1170,9 @@ export default function AnalyticsModule() {
             <View style={styles.vegModeLeft}>
               <Text style={styles.vegModeEmoji}>🌱</Text>
               <View>
-                <Text style={styles.vegModeTitle}>Vegetarian Mode</Text>
+                <Text style={styles.vegModeTitle}>🥗 Vegetarian Mode</Text>
                 <Text style={styles.vegModeSubtitle}>
-                  {vegMode ? "Only showing veg foods" : "Showing all foods"}
+                  {vegMode ? "✅ Only showing 🌿 veg foods" : "🍖 Showing all foods"}
                 </Text>
               </View>
             </View>
@@ -1229,7 +1241,7 @@ export default function AnalyticsModule() {
           <View style={styles.browseFoodsSection}>
             <Text style={styles.browseSectionTitle}>🍽️ Browse Foods by Nutrient</Text>
             <Text style={styles.browseSectionSubtitle}>
-              Discover foods rich in specific macros {vegMode && "(Veg Mode)"}
+              🌟 Discover foods rich in specific macros {vegMode ? "🌱 (Veg Mode ON)" : "🍴 (All Foods)"}
             </Text>
 
             <View style={styles.nutrientButtonsGrid}>
@@ -1254,7 +1266,7 @@ export default function AnalyticsModule() {
                     <Text style={[styles.nutrientBrowseName, { color: config.color }]}>
                       {config.title}
                     </Text>
-                    <Icon name="chevron-right" size={24} color={config.color} />
+                    <Text style={styles.nutrientBrowseArrow}>▶️</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -1266,16 +1278,16 @@ export default function AnalyticsModule() {
             style={styles.viewAnalyticsButton}
             onPress={() => setCurrentView("analytics")}
           >
-            <Icon name="chart-box" size={24} color="#fff" />
-            <Text style={styles.viewAnalyticsText}>View Detailed Analytics</Text>
-            <Icon name="chevron-right" size={24} color="#fff" />
+            <Text style={styles.viewAnalyticsEmoji}>📊</Text>
+            <Text style={styles.viewAnalyticsText}>📈 View Detailed Analytics</Text>
+            <Text style={styles.viewAnalyticsArrow}>➡️</Text>
           </TouchableOpacity>
 
           {/* Quick Tips */}
           <View style={styles.quickTipsCard}>
             <View style={styles.quickTipsHeader}>
-              <Icon name="lightbulb-on" size={24} color="#92400E" style={{ marginRight: 10 }} />
-              <Text style={styles.quickTipsTitle}>Personalized Tips</Text>
+              <Text style={styles.quickTipsHeaderEmoji}>💡</Text>
+              <Text style={styles.quickTipsTitle}>✨ Personalized Tips</Text>
             </View>
             {getTips().slice(0, 2).map((tip, i) => (
               <View key={i} style={styles.quickTipItem}>
@@ -1290,7 +1302,7 @@ export default function AnalyticsModule() {
           {/* Footer */}
           <View style={styles.dashboardFooter}>
             <Text style={styles.footerText}>
-              💡 Pull down to refresh • 🌙 Auto-updates at midnight
+              💡 Pull down to refresh 🔄 • 🌙 Auto-updates at midnight ✨
             </Text>
           </View>
         </ScrollView>
@@ -1298,7 +1310,7 @@ export default function AnalyticsModule() {
     );
   }
 
-  // Analytics Screen (unchanged from original)
+  // Analytics Screen
   const chartData = selectedPeriod === "weekly" ? reportData.weekly : reportData.monthly;
 
   return (
@@ -1308,7 +1320,7 @@ export default function AnalyticsModule() {
         <TouchableOpacity onPress={handleBack} style={styles.backButton}>
           <Icon name="arrow-left" size={24} color="#1F2937" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Detailed Analytics</Text>
+        <Text style={styles.headerTitle}>📊 Detailed Analytics</Text>
         <View style={{ width: 24 }} />
       </View>
 
@@ -1405,7 +1417,7 @@ export default function AnalyticsModule() {
                     : styles.switchText
                 }
               >
-                {period.label.split(' ')[1]}
+                {period.label.split(' ')[1]} {period.label.split(' ')[2]}
               </Text>
             </TouchableOpacity>
           ))}
@@ -1442,7 +1454,7 @@ export default function AnalyticsModule() {
             />
           </ScrollView>
           <Text style={styles.chartHint}>
-            👆 Swipe left/right to explore {selectedPeriod === "weekly" ? "7" : "30"} days
+            👆 Swipe left/right to explore {selectedPeriod === "weekly" ? "7 📅" : "30 📆"} days
           </Text>
         </View>
 
@@ -1451,7 +1463,7 @@ export default function AnalyticsModule() {
           <View style={styles.chartContainer}>
             <View style={styles.chartHeader}>
               <Text style={styles.chartEmoji}>🥧</Text>
-              <Text style={styles.chartTitle}>📊 Macro Distribution</Text>
+              <Text style={styles.chartTitle}>🍰 Macro Distribution Today</Text>
             </View>
             <PieChart
               data={macroDistribution}
@@ -1498,8 +1510,8 @@ export default function AnalyticsModule() {
               </>
             ) : (
               <>
-                <Icon name="file-download" size={22} color="#fff" />
-                <Text style={styles.btnText}>📄 Export Report</Text>
+                <Text style={styles.btnEmoji}>📄</Text>
+                <Text style={styles.btnText}>📥 Export Report</Text>
               </>
             )}
           </TouchableOpacity>
@@ -1508,15 +1520,15 @@ export default function AnalyticsModule() {
             style={[styles.actionBtn, styles.shareBtn]}
             onPress={onShare}
           >
-            <Icon name="share-variant" size={22} color="#fff" />
-            <Text style={styles.btnText}>📤 Share Summary</Text>
+            <Text style={styles.btnEmoji}>📤</Text>
+            <Text style={styles.btnText}>🚀 Share Summary</Text>
           </TouchableOpacity>
         </View>
 
         {/* Footer */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>
-            💡 Pull down to refresh • 🌙 Auto-updates daily
+            💡 Pull down to refresh 🔄 • 🌙 Auto-updates daily ✨
           </Text>
         </View>
       </ScrollView>
@@ -1533,13 +1545,20 @@ const styles = StyleSheet.create({
     flex: 1, 
     justifyContent: "center", 
     alignItems: "center",
-    backgroundColor: "#F9FAFB"
+    backgroundColor: "#F9FAFB",
+    padding: 20,
   },
   loadingText: {
     marginTop: 16,
     color: "#6B7280",
     fontSize: 16,
     fontWeight: "600",
+  },
+  loadingSubtext: {
+    marginTop: 8,
+    color: "#9CA3AF",
+    fontSize: 14,
+    fontWeight: "500",
   },
   
   // Veg Mode Toggle styles
@@ -1658,6 +1677,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
     shadowRadius: 4,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  refreshEmoji: {
+    fontSize: 28,
   },
   totalMacrosContainer: {
     marginBottom: 24,
@@ -1786,6 +1810,9 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: "800",
   },
+  nutrientBrowseArrow: {
+    fontSize: 22,
+  },
   viewAnalyticsButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -1800,12 +1827,18 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: 6,
   },
+  viewAnalyticsEmoji: {
+    fontSize: 26,
+    marginRight: 8,
+  },
   viewAnalyticsText: {
     color: "#fff",
     fontSize: 17,
     fontWeight: "800",
-    marginLeft: 12,
-    marginRight: 12,
+    marginRight: 8,
+  },
+  viewAnalyticsArrow: {
+    fontSize: 22,
   },
   quickTipsCard: {
     backgroundColor: "#FEF3C7",
@@ -1825,7 +1858,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 18,
   },
-  quickTipsEmoji: {
+  quickTipsHeaderEmoji: {
     fontSize: 26,
     marginRight: 10,
   },
@@ -1875,7 +1908,13 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   backButton: {
+    flexDirection: "row",
+    alignItems: "center",
     padding: 8,
+  },
+  backButtonText: {
+    fontSize: 18,
+    marginLeft: 4,
   },
   headerTitle: {
     fontSize: 19,
@@ -1895,8 +1934,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
+    borderWidth: 1.5,
+    borderColor: "#E5E7EB",
   },
-  searchIcon: {
+  searchPrefixEmoji: {
+    fontSize: 20,
     marginRight: 10,
   },
   searchInput: {
@@ -1905,6 +1947,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#1F2937",
     fontWeight: "500",
+  },
+  clearSearchBtn: {
+    padding: 4,
+  },
+  clearSearchEmoji: {
+    fontSize: 18,
   },
   infoBar: {
     padding: 14,
@@ -1972,7 +2020,7 @@ const styles = StyleSheet.create({
   primaryNutrientValue: {
     color: "#fff",
     fontWeight: "800",
-    fontSize: 16,
+    fontSize: 15,
   },
   macroRow: {
     flexDirection: "row",
@@ -1988,14 +2036,24 @@ const styles = StyleSheet.create({
   },
   macroLabel: {
     fontSize: 20,
-    marginBottom: 6,
+    marginBottom: 4,
   },
   macroValue: {
     fontSize: 14,
     fontWeight: "700",
     color: "#4B5563",
   },
+  macroUnit: {
+    fontSize: 11,
+    color: "#9CA3AF",
+    fontWeight: "500",
+  },
+  foodCardActions: {
+    flexDirection: "row",
+    gap: 10,
+  },
   quickAddButton: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -2006,11 +2064,43 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 3,
+    borderWidth: 1.5,
+  },
+  quickAddEmoji: {
+    fontSize: 16,
+    marginRight: 6,
   },
   quickAddText: {
     fontWeight: "800",
-    fontSize: 15,
-    marginLeft: 8,
+    fontSize: 14,
+  },
+  detailsButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    elevation: 2,
+  },
+  detailsButtonText: {
+    fontSize: 22,
+  },
+
+  // Food Detail styles
+  nutritionFactsBox: {
+    backgroundColor: "#F9FAFB",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  nutritionFactsTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#374151",
+    marginBottom: 14,
+    textAlign: "center",
   },
   detailCard: {
     backgroundColor: "#fff",
@@ -2050,7 +2140,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "space-between",
-    marginBottom: 26,
+    marginBottom: 10,
   },
   macroDetailCard: {
     width: "48%",
@@ -2123,6 +2213,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#9CA3AF",
     fontWeight: "600",
+    textAlign: "center",
   },
   
   // Analytics page styles
@@ -2406,11 +2497,14 @@ const styles = StyleSheet.create({
   shareBtn: {
     backgroundColor: "#3B82F6",
   },
+  btnEmoji: {
+    fontSize: 22,
+    marginRight: 8,
+  },
   btnText: {
     color: "#fff",
     fontWeight: "900",
     fontSize: 15,
-    marginLeft: 10,
   },
   footer: {
     alignItems: "center",

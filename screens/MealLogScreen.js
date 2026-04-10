@@ -14,2056 +14,822 @@ import {
   Platform,
   Animated,
   Dimensions,
+  StatusBar,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import LinearGradient from "react-native-linear-gradient";
+import * as Progress from "react-native-progress";
 import { debounce } from "lodash";
 
-// ===== CONSTANTS =====
 const { width } = Dimensions.get("window");
 
-const NUTRIENT_IDS = {
-  CALORIES: 1008,
-  PROTEIN: 1003,
-  CARBS: 1005,
-  FATS: 1004,
-  FIBER: 1079,
-  SODIUM: 1093,
+// ─── LIGHT THEME ──────────────────────────────────────────────────────────────
+const T = {
+  bg:       "#F4F6FB",
+  card:     "#FFFFFF",
+  border:   "#E8ECF4",
+  textPrim: "#1A2340",
+  textSec:  "#6B7A99",
+  textMute: "#A0AABD",
+
+  accent:   "#667EEA",
+  accentSoft: "#667EEA15",
+
+  cal:   "#FF6B6B",  calBg:   "#FF6B6B12",
+  prot:  "#4FACFE",  protBg:  "#4FACFE12",
+  carbs: "#F5A623",  carbsBg: "#F5A62312",
+  fat:   "#A78BFA",  fatBg:   "#A78BFA12",
+  water: "#10B981",  waterBg: "#10B98112",
+
+  danger:  "#EF4444",
+  success: "#10B981",
+  warn:    "#F59E0B",
 };
 
+// ─── CONSTANTS ────────────────────────────────────────────────────────────────
+const NUTRIENT_IDS = { CALORIES: 1008, PROTEIN: 1003, CARBS: 1005, FATS: 1004, FIBER: 1079, SODIUM: 1093 };
 const API_CONFIG = {
   KEY: "J7tDs0cUGkWOtNmOKtNLYIewxQOnOmYDhvf8R3hy",
   SEARCH_URL: "https://api.nal.usda.gov/fdc/v1/foods/search",
   DETAILS_URL: "https://api.nal.usda.gov/fdc/v1/food",
   TIMEOUT: 10000,
 };
+const STORAGE_KEYS = { FOODS: "selectedFoods", WATER: "waterIntake", SUPPLEMENTS: "supplements", RECIPES: "savedRecipes", GOALS: "nutritionGoals", HISTORY: "mealHistory" };
+const DEFAULT_GOALS = { calorieGoal: 2000, proteinGoal: 150, waterGoal: 2500, carbsGoal: 250, fatsGoal: 65 };
+const formatNumber = (n) => (isNaN(n) ? "0" : parseFloat(n).toFixed(1));
+const today = () => new Date().toISOString().split("T")[0];
 
-const STORAGE_KEYS = {
-  FOODS: "selectedFoods",
-  WATER: "waterIntake",
-  SUPPLEMENTS: "supplements",
-  RECIPES: "savedRecipes",
-  NUTRITION_GOALS: "nutritionGoals",
-  HISTORY: "mealHistory",
+// ─── SERVICES ─────────────────────────────────────────────────────────────────
+const Storage = {
+  async save(key, val) { try { await AsyncStorage.setItem(key, JSON.stringify(val)); return true; } catch { return false; } },
+  async load(key, def = null) { try { const d = await AsyncStorage.getItem(key); return d ? JSON.parse(d) : def; } catch { return def; } },
 };
 
-const DEFAULT_GOALS = {
-  calorieGoal: 2000,
-  proteinGoal: 150,
-  waterGoal: 2500,
-  carbsGoal: 250,
-  fatsGoal: 65,
-};
-
-const COLORS = {
-  primary: "#3B82F6",
-  secondary: "#10B981",
-  danger: "#EF4444",
-  warning: "#F59E0B",
-  purple: "#8B5CF6",
-  dark: "#0F172A",
-  gray: "#64748B",
-  lightGray: "#94A3B8",
-  background: "#F8FAFC",
-  white: "#FFFFFF",
-  border: "#E2E8F0",
-};
-
-// ===== UTILITY FUNCTIONS =====
-const formatNumber = (num) => (isNaN(num) ? "0" : parseFloat(num).toFixed(1));
-const getCurrentDate = () => new Date().toISOString().split("T")[0];
-
-const fetchWithTimeout = async (url, options = {}, timeout = API_CONFIG.TIMEOUT) => {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
-  
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    });
-    clearTimeout(id);
-    return response;
-  } catch (error) {
-    clearTimeout(id);
-    throw error;
-  }
-};
-
-// ===== STORAGE SERVICE =====
-const StorageService = {
-  async saveData(key, value) {
+const API = {
+  async search(query, pageSize = 20) {
+    if (!query || query.length < 2) return { success: false, data: [] };
     try {
-      await AsyncStorage.setItem(key, JSON.stringify(value));
-      return true;
-    } catch (error) {
-      console.error(`Error saving ${key}:`, error);
-      return false;
-    }
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), API_CONFIG.TIMEOUT);
+      const res = await fetch(`${API_CONFIG.SEARCH_URL}?query=${encodeURIComponent(query)}&api_key=${API_CONFIG.KEY}&pageSize=${pageSize}`, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      return { success: true, data: data.foods || [] };
+    } catch (e) { return { success: false, data: [], error: e.name === "AbortError" ? "Timeout" : "Network error" }; }
   },
-
-  async getData(key, defaultValue = null) {
+  async details(fdcId) {
     try {
-      const data = await AsyncStorage.getItem(key);
-      return data ? JSON.parse(data) : defaultValue;
-    } catch (error) {
-      console.error(`Error loading ${key}:`, error);
-      return defaultValue;
-    }
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), API_CONFIG.TIMEOUT);
+      const res = await fetch(`${API_CONFIG.DETAILS_URL}/${fdcId}?api_key=${API_CONFIG.KEY}`, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      return { success: true, data };
+    } catch (e) { return { success: false, data: null }; }
   },
-
-  async saveHistory(foods, date) {
-    try {
-      const history = await this.getData(STORAGE_KEYS.HISTORY, {});
-      history[date] = foods;
-      await this.saveData(STORAGE_KEYS.HISTORY, history);
-      return true;
-    } catch (error) {
-      console.error("Error saving history:", error);
-      return false;
-    }
-  },
-
-  async getHistory(date) {
-    try {
-      const history = await this.getData(STORAGE_KEYS.HISTORY, {});
-      return history[date] || [];
-    } catch (error) {
-      console.error("Error loading history:", error);
-      return [];
-    }
+  nutrients(fd) {
+    const get = (id) => fd.foodNutrients?.find((n) => n.nutrient?.id === id)?.amount || 0;
+    return { calories: get(NUTRIENT_IDS.CALORIES), protein: get(NUTRIENT_IDS.PROTEIN), carbs: get(NUTRIENT_IDS.CARBS), fats: get(NUTRIENT_IDS.FATS), fiber: get(NUTRIENT_IDS.FIBER), sodium: get(NUTRIENT_IDS.SODIUM) };
   },
 };
 
-// ===== API SERVICE =====
-const FoodAPIService = {
-  async searchFoods(query, pageSize = 20) {
-    if (!query || query.length < 2) {
-      return { success: false, data: [], error: "Query too short" };
-    }
-
-    try {
-      const url = `${API_CONFIG.SEARCH_URL}?query=${encodeURIComponent(query)}&api_key=${API_CONFIG.KEY}&pageSize=${pageSize}`;
-      const response = await fetchWithTimeout(url);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      
-      const data = await response.json();
-      return { success: true, data: data.foods || [], error: null };
-    } catch (error) {
-      return { 
-        success: false, 
-        data: [], 
-        error: error.name === "AbortError" ? "Request timeout" : "Network error" 
-      };
-    }
-  },
-
-  async getFoodDetails(fdcId) {
-    try {
-      const url = `${API_CONFIG.DETAILS_URL}/${fdcId}?api_key=${API_CONFIG.KEY}`;
-      const response = await fetchWithTimeout(url);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      
-      const data = await response.json();
-      return { success: true, data, error: null };
-    } catch (error) {
-      return { 
-        success: false, 
-        data: null, 
-        error: error.name === "AbortError" ? "Request timeout" : "Failed to load details" 
-      };
-    }
-  },
-
-  extractNutrients(foodDetails) {
-    const getNutrient = (id) => {
-      const nutrient = foodDetails.foodNutrients?.find((n) => n.nutrient?.id === id);
-      return nutrient?.amount || 0;
-    };
-
-    return {
-      calories: getNutrient(NUTRIENT_IDS.CALORIES),
-      protein: getNutrient(NUTRIENT_IDS.PROTEIN),
-      carbs: getNutrient(NUTRIENT_IDS.CARBS),
-      fats: getNutrient(NUTRIENT_IDS.FATS),
-      fiber: getNutrient(NUTRIENT_IDS.FIBER),
-      sodium: getNutrient(NUTRIENT_IDS.SODIUM),
-    };
-  },
-};
-
-// ===== COMPONENTS =====
-
-// Animated Progress Ring
-const ProgressRing = ({ current, goal, size = 80, strokeWidth = 8, color = COLORS.primary }) => {
-  const percentage = Math.min((current / goal) * 100, 100);
-  const radius = (size - strokeWidth) / 2;
-  const circumference = radius * 2 * Math.PI;
-  const strokeDashoffset = circumference - (percentage / 100) * circumference;
+// ─── PROGRESS BAR ────────────────────────────────────────────────────────────
+const NutrientBar = ({ label, emoji, current, goal, color, colorBg }) => {
+  const pct = goal > 0 ? Math.min(current / goal, 1) : 0;
+  const over = current > goal && goal > 0;
+  const remaining = Math.max(goal - current, 0);
+  const pctDisplay = Math.round(pct * 100);
 
   return (
-    <View style={{ width: size, height: size, position: 'relative' }}>
-      <svg width={size} height={size} style={{ transform: [{ rotate: '-90deg' }] }}>
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          stroke={COLORS.border}
-          strokeWidth={strokeWidth}
-          fill="none"
-        />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          stroke={color}
-          strokeWidth={strokeWidth}
-          fill="none"
-          strokeDasharray={circumference}
-          strokeDashoffset={strokeDashoffset}
-          strokeLinecap="round"
-        />
-      </svg>
-      <View style={styles.ringCenter}>
-        <Text style={styles.ringPercentage}>{Math.round(percentage)}%</Text>
-      </View>
-    </View>
-  );
-};
-
-// Enhanced Progress Bar
-const ProgressBar = ({ current, goal, label, color = COLORS.primary, icon }) => {
-  const percentage = Math.min((current / goal) * 100, 100);
-  const isOverGoal = current > goal;
-  const remaining = Math.max(0, goal - current);
-
-  return (
-    <View style={styles.progressContainer}>
-      <View style={styles.progressHeader}>
-        <View style={styles.progressLabelRow}>
-          {icon && <Text style={styles.progressIcon}>{icon}</Text>}
-          <Text style={styles.progressLabel}>{label}</Text>
+    <View style={styles.nutrientBar}>
+      <View style={styles.nutrientBarTop}>
+        <View style={styles.nutrientBarLeft}>
+          <View style={[styles.nutrientDot, { backgroundColor: color }]} />
+          <Text style={styles.nutrientBarLabel}>{emoji} {label}</Text>
         </View>
-        <View style={styles.progressValues}>
-          <Text style={[styles.progressCurrent, isOverGoal && styles.overGoal]}>
-            {formatNumber(current)}
-          </Text>
-          <Text style={styles.progressGoal}> / {formatNumber(goal)}</Text>
+        <View style={styles.nutrientBarRight}>
+          <Text style={[styles.nutrientCurrent, { color }]}>{formatNumber(current)}</Text>
+          <Text style={styles.nutrientGoalText}>/{goal}</Text>
+          <View style={[styles.pctBadge, { backgroundColor: colorBg }]}>
+            <Text style={[styles.pctBadgeText, { color }]}>{pctDisplay}%</Text>
+          </View>
         </View>
       </View>
-      <View style={styles.progressBarBg}>
-        <Animated.View 
-          style={[
-            styles.progressBarFill, 
-            { 
-              width: `${percentage}%`, 
-              backgroundColor: isOverGoal ? COLORS.danger : color 
-            }
-          ]} 
-        />
-      </View>
-      {!isOverGoal && remaining > 0 && (
-        <Text style={styles.remainingText}>{formatNumber(remaining)} remaining</Text>
+      <Progress.Bar
+        progress={pct}
+        width={null}
+        height={8}
+        color={over ? T.danger : color}
+        unfilledColor={T.border}
+        borderWidth={0}
+        borderRadius={8}
+        style={{ marginTop: 8 }}
+      />
+      {!over && remaining > 0 && (
+        <Text style={styles.nutrientRemaining}>{formatNumber(remaining)} left</Text>
       )}
     </View>
   );
 };
 
-// Food List Item with Image Support
-const FoodListItem = React.memo(({ item, onPress }) => (
+// ─── STAT CHIP ────────────────────────────────────────────────────────────────
+const StatChip = ({ emoji, label, value, unit, color, colorBg }) => (
+  <View style={[styles.statChip, { borderTopColor: color, borderTopWidth: 3 }]}>
+    <Text style={styles.statChipEmoji}>{emoji}</Text>
+    <Text style={[styles.statChipValue, { color }]}>{value}</Text>
+    <Text style={styles.statChipUnit}>{unit}</Text>
+    <Text style={styles.statChipLabel}>{label}</Text>
+  </View>
+);
+
+// ─── FOOD RESULT ITEM ────────────────────────────────────────────────────────
+const FoodResultItem = React.memo(({ item, onPress }) => (
   <TouchableOpacity onPress={onPress} style={styles.resultItem} activeOpacity={0.7}>
-    <View style={styles.resultItemContent}>
-      <Text style={styles.resultText} numberOfLines={2}>
-        {item.description}
-      </Text>
-      {item.brandName && (
-        <Text style={styles.brandText} numberOfLines={1}>
-          📦 {item.brandName}
-        </Text>
-      )}
+    <View style={styles.resultLeft}>
+      <View style={styles.resultIconWrap}>
+        <Text style={styles.resultIcon}>🍽️</Text>
+      </View>
+      <View style={styles.resultInfo}>
+        <Text style={styles.resultName} numberOfLines={2}>{item.description}</Text>
+        {item.brandName && <Text style={styles.resultBrand}>📦 {item.brandName}</Text>}
+      </View>
     </View>
-    <View style={styles.resultArrow}>
-      <Text style={styles.arrowText}>›</Text>
-    </View>
+    <Text style={styles.resultChevron}>›</Text>
   </TouchableOpacity>
 ));
 
-// Enhanced Logged Food Item
-const LoggedFoodItem = React.memo(({ item, onRemove, onEdit }) => {
+// ─── LOGGED FOOD ITEM ────────────────────────────────────────────────────────
+const LoggedItem = React.memo(({ item, onRemove }) => {
   const [expanded, setExpanded] = useState(false);
-
   return (
     <View style={styles.logItem}>
-      <TouchableOpacity 
-        style={styles.logItemContent} 
-        onPress={() => setExpanded(!expanded)}
-        activeOpacity={0.7}
-      >
+      <TouchableOpacity style={{ flex: 1 }} onPress={() => setExpanded(!expanded)} activeOpacity={0.7}>
         <View style={styles.logItemHeader}>
-          <Text style={styles.logItemName} numberOfLines={expanded ? undefined : 2}>
-            {item.name}
-          </Text>
-          <Text style={styles.logItemCalories}>{formatNumber(item.calories)} kcal</Text>
+          <Text style={styles.logItemName} numberOfLines={expanded ? undefined : 1}>{item.name}</Text>
+          <Text style={[styles.logItemCal, { color: T.cal }]}>{formatNumber(item.calories)} kcal</Text>
         </View>
-        
         <View style={styles.macroRow}>
-          {item.protein > 0 && (
-            <View style={styles.macroChip}>
-              <Text style={styles.macroChipText}>P: {formatNumber(item.protein)}g</Text>
-            </View>
-          )}
-          {item.carbs > 0 && (
-            <View style={[styles.macroChip, { backgroundColor: '#FEF3C7' }]}>
-              <Text style={[styles.macroChipText, { color: '#92400E' }]}>C: {formatNumber(item.carbs)}g</Text>
-            </View>
-          )}
-          {item.fats > 0 && (
-            <View style={[styles.macroChip, { backgroundColor: '#E0E7FF' }]}>
-              <Text style={[styles.macroChipText, { color: '#3730A3' }]}>F: {formatNumber(item.fats)}g</Text>
-            </View>
-          )}
+          <View style={[styles.macroChip, { backgroundColor: T.protBg }]}>
+            <Text style={[styles.macroChipText, { color: T.prot }]}>P {formatNumber(item.protein)}g</Text>
+          </View>
+          <View style={[styles.macroChip, { backgroundColor: T.carbsBg }]}>
+            <Text style={[styles.macroChipText, { color: T.carbs }]}>C {formatNumber(item.carbs)}g</Text>
+          </View>
+          <View style={[styles.macroChip, { backgroundColor: T.fatBg }]}>
+            <Text style={[styles.macroChipText, { color: T.fat }]}>F {formatNumber(item.fats)}g</Text>
+          </View>
         </View>
-
         {expanded && (
-          <View style={styles.expandedInfo}>
-            {item.quantity !== "custom" && (
-              <Text style={styles.quantityText}>Quantity: {formatNumber(item.quantity)}g</Text>
-            )}
-            {item.fiber > 0 && (
-              <Text style={styles.detailText}>Fiber: {formatNumber(item.fiber)}g</Text>
-            )}
-            {item.sodium > 0 && (
-              <Text style={styles.detailText}>Sodium: {formatNumber(item.sodium)}mg</Text>
-            )}
+          <View style={styles.logItemExpanded}>
+            {item.quantity !== "custom" && <Text style={styles.logItemDetail}>Quantity: {formatNumber(item.quantity)}g</Text>}
+            {item.fiber > 0 && <Text style={styles.logItemDetail}>Fiber: {formatNumber(item.fiber)}g</Text>}
+            {item.sodium > 0 && <Text style={styles.logItemDetail}>Sodium: {formatNumber(item.sodium)}mg</Text>}
           </View>
         )}
-
-        <Text style={styles.timestamp}>
+        <Text style={styles.logItemTime}>
           🕐 {new Date(item.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
         </Text>
       </TouchableOpacity>
-      
-      <TouchableOpacity 
-        onPress={onRemove} 
-        style={styles.removeButtonContainer}
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-      >
-        <View style={styles.removeButton}>
-          <Text style={styles.removeButtonText}>✕</Text>
-        </View>
+      <TouchableOpacity onPress={onRemove} style={styles.removeBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+        <Text style={styles.removeBtnText}>✕</Text>
       </TouchableOpacity>
     </View>
   );
 });
 
-// Quick Action Button
-const QuickActionButton = ({ icon, label, onPress, color = COLORS.primary, disabled }) => (
-  <TouchableOpacity 
-    style={[styles.quickActionButton, { backgroundColor: color }, disabled && styles.disabledButton]} 
-    onPress={onPress}
-    disabled={disabled}
-    activeOpacity={0.7}
-  >
-    <Text style={styles.quickActionIcon}>{icon}</Text>
-    <Text style={styles.quickActionLabel}>{label}</Text>
-  </TouchableOpacity>
+// ─── MODAL WRAPPER ────────────────────────────────────────────────────────────
+const Sheet = ({ visible, onClose, title, children }) => (
+  <Modal visible={visible} transparent animationType="slide">
+    <View style={styles.sheetOverlay}>
+      <View style={styles.sheet}>
+        <View style={styles.sheetHandle} />
+        <View style={styles.sheetHeader}>
+          <Text style={styles.sheetTitle}>{title}</Text>
+          <TouchableOpacity onPress={onClose} style={styles.sheetClose}>
+            <Text style={styles.sheetCloseText}>✕</Text>
+          </TouchableOpacity>
+        </View>
+        {children}
+      </View>
+    </View>
+  </Modal>
 );
 
-// Stats Card
-const StatsCard = ({ icon, label, value, unit, color }) => (
-  <View style={[styles.statsCard, { borderLeftColor: color }]}>
-    <Text style={styles.statsIcon}>{icon}</Text>
-    <Text style={styles.statsLabel}>{label}</Text>
-    <Text style={styles.statsValue}>
-      {value}
-      <Text style={styles.statsUnit}> {unit}</Text>
-    </Text>
-  </View>
-);
-
-// ===== MAIN COMPONENT =====
+// ─── MAIN SCREEN ──────────────────────────────────────────────────────────────
 export default function MealLogScreen() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState(null);
 
-  const [selectedFoods, setSelectedFoods] = useState([]);
-  const [waterIntake, setWaterIntake] = useState(0);
+  const [foods, setFoods] = useState([]);
+  const [water, setWater] = useState(0);
   const [supplements, setSupplements] = useState([]);
   const [recipes, setRecipes] = useState([]);
-  const [dailyGoals, setDailyGoals] = useState(DEFAULT_GOALS);
+  const [goals, setGoals] = useState(DEFAULT_GOALS);
 
-  const [modalVisible, setModalVisible] = useState(false);
+  const [detailModal, setDetailModal] = useState(false);
   const [foodDetails, setFoodDetails] = useState(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
-  const [quantity, setQuantity] = useState("");
-  const [calculated, setCalculated] = useState({
-    calories: 0,
-    protein: 0,
-    carbs: 0,
-    fats: 0,
-    fiber: 0,
-    sodium: 0,
-  });
+  const [quantity, setQuantity] = useState("100");
+  const [calc, setCalc] = useState({ calories: 0, protein: 0, carbs: 0, fats: 0, fiber: 0, sodium: 0 });
 
   const [customModal, setCustomModal] = useState(false);
-  const [customFood, setCustomFood] = useState({
-    name: "",
-    calories: "",
-    protein: "",
-    carbs: "",
-    fats: "",
-  });
+  const [customFood, setCustomFood] = useState({ name: "", calories: "", protein: "", carbs: "", fats: "" });
 
   const [waterModal, setWaterModal] = useState(false);
-  const [waterAmount, setWaterAmount] = useState("");
+  const [waterAmt, setWaterAmt] = useState("");
+
   const [recipeModal, setRecipeModal] = useState(false);
   const [recipeName, setRecipeName] = useState("");
   const [loadRecipeModal, setLoadRecipeModal] = useState(false);
+
   const [goalsModal, setGoalsModal] = useState(false);
+  const [editGoals, setEditGoals] = useState(DEFAULT_GOALS);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const lastDateRef = useRef(getCurrentDate());
+  const lastDate = useRef(today());
+
+  useEffect(() => { loadAll(); Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }).start(); }, []);
 
   useEffect(() => {
-    loadAllData();
-    fadeIn();
-  }, []);
-
-  useEffect(() => {
-    const checkMidnight = setInterval(() => {
-      const currentDate = getCurrentDate();
-      if (currentDate !== lastDateRef.current) {
-        handleMidnightReset(lastDateRef.current);
-        lastDateRef.current = currentDate;
-      }
+    const check = setInterval(() => {
+      const cur = today();
+      if (cur !== lastDate.current) { handleMidnightReset(lastDate.current); lastDate.current = cur; }
     }, 60000);
+    return () => clearInterval(check);
+  }, [foods]);
 
-    return () => clearInterval(checkMidnight);
-  }, [selectedFoods]);
+  const handleMidnightReset = async (prev) => {
+    if (foods.length > 0) { const h = await Storage.load(STORAGE_KEYS.HISTORY, {}); h[prev] = foods; await Storage.save(STORAGE_KEYS.HISTORY, h); }
+    setFoods([]); setWater(0); setSupplements([]);
+    Alert.alert("New Day! 🌅", "Yesterday's data saved. Fresh start today!");
+  };
 
-  const handleMidnightReset = async (previousDate) => {
-    if (selectedFoods.length > 0) {
-      await StorageService.saveHistory(selectedFoods, previousDate);
-    }
-
-    setSelectedFoods([]);
-    setWaterIntake(0);
-    setSupplements([]);
-    
-    await Promise.all([
-      StorageService.saveData(STORAGE_KEYS.FOODS, []),
-      StorageService.saveData(STORAGE_KEYS.WATER, 0),
-      StorageService.saveData(STORAGE_KEYS.SUPPLEMENTS, []),
+  const loadAll = async () => {
+    const [savedFoods, savedWater, savedSupps, savedRecipes, savedGoals] = await Promise.all([
+      Storage.load(STORAGE_KEYS.FOODS, []),
+      Storage.load(STORAGE_KEYS.WATER, 0),
+      Storage.load(STORAGE_KEYS.SUPPLEMENTS, []),
+      Storage.load(STORAGE_KEYS.RECIPES, []),
+      Storage.load(STORAGE_KEYS.GOALS, DEFAULT_GOALS),
     ]);
-
-    Alert.alert("New Day! 🌅", "Your log has been reset. Yesterday's data is saved.", [{ text: "OK" }]);
-  };
-
-  const fadeIn = () => {
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 600,
-      useNativeDriver: true,
-    }).start();
-  };
-
-  const loadAllData = async () => {
-    try {
-      const currentDate = getCurrentDate();
-      
-      const [foods, water, supps, savedRecipes, goals] = await Promise.all([
-        StorageService.getData(STORAGE_KEYS.FOODS, []),
-        StorageService.getData(STORAGE_KEYS.WATER, 0),
-        StorageService.getData(STORAGE_KEYS.SUPPLEMENTS, []),
-        StorageService.getData(STORAGE_KEYS.RECIPES, []),
-        StorageService.getData(STORAGE_KEYS.NUTRITION_GOALS, DEFAULT_GOALS),
-      ]);
-
-      const lastFoodDate = foods.length > 0 
-        ? new Date(foods[0].timestamp).toISOString().split("T")[0]
-        : currentDate;
-
-      if (lastFoodDate !== currentDate) {
-        if (foods.length > 0) {
-          await StorageService.saveHistory(foods, lastFoodDate);
-        }
-        setSelectedFoods([]);
-        setWaterIntake(0);
-        setSupplements([]);
-      } else {
-        setSelectedFoods(foods);
-        setWaterIntake(water);
-        setSupplements(supps);
-      }
-
-      setRecipes(savedRecipes);
-      setDailyGoals(goals);
-      lastDateRef.current = currentDate;
-    } catch (error) {
-      Alert.alert("Error", "Failed to load saved data");
+    const t = today();
+    const lastFoodDate = savedFoods.length > 0 ? new Date(savedFoods[0].timestamp).toISOString().split("T")[0] : t;
+    if (lastFoodDate !== t) {
+      if (savedFoods.length > 0) { const h = await Storage.load(STORAGE_KEYS.HISTORY, {}); h[lastFoodDate] = savedFoods; await Storage.save(STORAGE_KEYS.HISTORY, h); }
+    } else {
+      setFoods(savedFoods); setWater(savedWater); setSupplements(savedSupps);
     }
+    setRecipes(savedRecipes); setGoals(savedGoals); setEditGoals(savedGoals);
   };
 
   useEffect(() => {
-    const saveData = async () => {
-      await Promise.all([
-        StorageService.saveData(STORAGE_KEYS.FOODS, selectedFoods),
-        StorageService.saveData(STORAGE_KEYS.WATER, waterIntake),
-        StorageService.saveData(STORAGE_KEYS.SUPPLEMENTS, supplements),
-        StorageService.saveData(STORAGE_KEYS.RECIPES, recipes),
-      ]);
-
-      if (selectedFoods.length > 0) {
-        StorageService.saveHistory(selectedFoods, getCurrentDate());
-      }
-    };
-    saveData();
-  }, [selectedFoods, waterIntake, supplements, recipes]);
+    Storage.save(STORAGE_KEYS.FOODS, foods);
+    Storage.save(STORAGE_KEYS.WATER, water);
+    Storage.save(STORAGE_KEYS.SUPPLEMENTS, supplements);
+    Storage.save(STORAGE_KEYS.RECIPES, recipes);
+  }, [foods, water, supplements, recipes]);
 
   const debouncedSearch = useCallback(
     debounce(async (text) => {
-      if (!text || text.length < 2) {
-        setResults([]);
-        setSearchError(null);
-        return;
-      }
-
-      setLoading(true);
-      setSearchError(null);
-
-      const result = await FoodAPIService.searchFoods(text);
-
-      if (result.success) {
-        setResults(result.data);
-      } else {
-        setSearchError(result.error);
-        setResults([]);
-      }
-
-      setLoading(false);
+      if (!text || text.length < 2) { setResults([]); setSearchError(null); return; }
+      setSearching(true); setSearchError(null);
+      const result = await API.search(text);
+      if (result.success) setResults(result.data);
+      else { setSearchError(result.error || "Search failed"); setResults([]); }
+      setSearching(false);
     }, 600),
     []
   );
 
-  const handleSearch = (text) => {
-    setQuery(text);
-    debouncedSearch(text);
-  };
+  const handleSearch = (text) => { setQuery(text); debouncedSearch(text); };
 
   const handleSelectFood = async (food) => {
-    setQuantity("100");
-    setCalculated({ calories: 0, protein: 0, carbs: 0, fats: 0, fiber: 0, sodium: 0 });
-    setModalVisible(true);
-    setLoadingDetails(true);
-    setFoodDetails(null);
-
-    const result = await FoodAPIService.getFoodDetails(food.fdcId);
-
-    if (result.success) {
-      setFoodDetails(result.data);
-      calculateMacros("100", result.data);
-    } else {
-      Alert.alert("Error", result.error);
-      setModalVisible(false);
-    }
-
+    setQuantity("100"); setCalc({ calories: 0, protein: 0, carbs: 0, fats: 0, fiber: 0, sodium: 0 });
+    setDetailModal(true); setLoadingDetails(true); setFoodDetails(null);
+    const result = await API.details(food.fdcId);
+    if (result.success) { setFoodDetails(result.data); recalc("100", result.data); }
+    else { Alert.alert("Error", "Could not load food details."); setDetailModal(false); }
     setLoadingDetails(false);
   };
 
-  const calculateMacros = (q, details = foodDetails) => {
+  const recalc = (q, details = foodDetails) => {
     setQuantity(q);
     if (!details) return;
-
-    const grams = parseFloat(q);
-    if (isNaN(grams) || grams <= 0) {
-      setCalculated({ calories: 0, protein: 0, carbs: 0, fats: 0, fiber: 0, sodium: 0 });
-      return;
-    }
-
-    const nutrients = FoodAPIService.extractNutrients(details);
-    const multiplier = grams / 100;
-
-    setCalculated({
-      calories: formatNumber(nutrients.calories * multiplier),
-      protein: formatNumber(nutrients.protein * multiplier),
-      carbs: formatNumber(nutrients.carbs * multiplier),
-      fats: formatNumber(nutrients.fats * multiplier),
-      fiber: formatNumber(nutrients.fiber * multiplier),
-      sodium: formatNumber(nutrients.sodium * multiplier),
-    });
+    const g = parseFloat(q);
+    if (isNaN(g) || g <= 0) { setCalc({ calories: 0, protein: 0, carbs: 0, fats: 0, fiber: 0, sodium: 0 }); return; }
+    const n = API.nutrients(details);
+    const m = g / 100;
+    setCalc({ calories: formatNumber(n.calories * m), protein: formatNumber(n.protein * m), carbs: formatNumber(n.carbs * m), fats: formatNumber(n.fats * m), fiber: formatNumber(n.fiber * m), sodium: formatNumber(n.sodium * m) });
   };
 
   const handleAddFood = () => {
     const qty = parseFloat(quantity);
-    if (!quantity || isNaN(qty) || qty <= 0) {
-      Alert.alert("Invalid Quantity", "Please enter a valid amount in grams.");
-      return;
-    }
-
-    const newFood = {
-      id: `${Date.now()}-${Math.random()}`,
-      name: foodDetails.description,
-      quantity: qty,
-      ...calculated,
-      timestamp: new Date().toISOString(),
-    };
-
-    setSelectedFoods((prev) => [...prev, newFood]);
-    setModalVisible(false);
-    setQuery("");
-    setResults([]);
-    setSearchError(null);
+    if (!quantity || isNaN(qty) || qty <= 0) { Alert.alert("Invalid Quantity", "Please enter a valid gram amount."); return; }
+    setFoods((p) => [...p, { id: `${Date.now()}-${Math.random()}`, name: foodDetails.description, quantity: qty, ...calc, timestamp: new Date().toISOString() }]);
+    setDetailModal(false); setQuery(""); setResults([]); setSearchError(null);
   };
 
-  const handleAddCustomFood = () => {
+  const handleAddCustom = () => {
     const { name, calories, protein, carbs, fats } = customFood;
-
-    if (!name.trim() || !calories || isNaN(parseFloat(calories))) {
-      Alert.alert("Invalid Input", "Please enter at least a name and calorie count.");
-      return;
-    }
-
-    const newFood = {
-      id: `${Date.now()}-${Math.random()}`,
-      name: name.trim(),
-      calories: formatNumber(parseFloat(calories)),
-      protein: formatNumber(parseFloat(protein || 0)),
-      carbs: formatNumber(parseFloat(carbs || 0)),
-      fats: formatNumber(parseFloat(fats || 0)),
-      quantity: "custom",
-      timestamp: new Date().toISOString(),
-    };
-
-    setSelectedFoods((prev) => [...prev, newFood]);
-    setCustomModal(false);
-    setCustomFood({ name: "", calories: "", protein: "", carbs: "", fats: "" });
+    if (!name.trim() || !calories || isNaN(parseFloat(calories))) { Alert.alert("Invalid Input", "Enter at least a name and calories."); return; }
+    setFoods((p) => [...p, { id: `${Date.now()}-${Math.random()}`, name: name.trim(), calories: formatNumber(parseFloat(calories)), protein: formatNumber(parseFloat(protein || 0)), carbs: formatNumber(parseFloat(carbs || 0)), fats: formatNumber(parseFloat(fats || 0)), quantity: "custom", timestamp: new Date().toISOString() }]);
+    setCustomModal(false); setCustomFood({ name: "", calories: "", protein: "", carbs: "", fats: "" });
   };
 
   const handleSaveRecipe = () => {
-    if (!recipeName.trim()) {
-      Alert.alert("Error", "Please provide a recipe name.");
-      return;
-    }
-
-    if (selectedFoods.length === 0) {
-      Alert.alert("Error", "Please log some food first.");
-      return;
-    }
-
-    const recipe = {
-      id: `${Date.now()}-${Math.random()}`,
-      name: recipeName.trim(),
-      foods: selectedFoods,
-      createdAt: new Date().toISOString(),
-    };
-
-    setRecipes((prev) => [...prev, recipe]);
-    setRecipeModal(false);
-    setRecipeName("");
-    Alert.alert("Success", `Recipe "${recipe.name}" saved!`);
+    if (!recipeName.trim()) { Alert.alert("Error", "Enter a recipe name."); return; }
+    if (foods.length === 0) { Alert.alert("Error", "Log some food first."); return; }
+    setRecipes((p) => [...p, { id: `${Date.now()}-${Math.random()}`, name: recipeName.trim(), foods, createdAt: new Date().toISOString() }]);
+    setRecipeModal(false); setRecipeName("");
+    Alert.alert("Saved!", `Recipe "${recipeName}" saved.`);
   };
 
   const handleLoadRecipe = (recipe) => {
-    const loadedFoods = recipe.foods.map((food) => ({
-      ...food,
-      id: `${Date.now()}-${Math.random()}`,
-      timestamp: new Date().toISOString(),
-    }));
-
-    setSelectedFoods((prev) => [...prev, ...loadedFoods]);
+    setFoods((p) => [...p, ...recipe.foods.map((f) => ({ ...f, id: `${Date.now()}-${Math.random()}`, timestamp: new Date().toISOString() }))]);
     setLoadRecipeModal(false);
-    Alert.alert("Recipe Loaded", `Added ${recipe.name} to your log.`);
-  };
-
-  const handleDeleteRecipe = (recipeId) => {
-    Alert.alert("Delete Recipe", "Are you sure?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: () => setRecipes((prev) => prev.filter((r) => r.id !== recipeId)),
-      },
-    ]);
-  };
-
-  const handleAddSupplement = (name) => {
-    if (!name.trim()) return;
-    
-    setSupplements((prev) => [
-      ...prev,
-      {
-        id: `${Date.now()}-${Math.random()}`,
-        name: name.trim(),
-        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        timestamp: new Date().toISOString(),
-      },
-    ]);
-  };
-
-  const handleAddWater = () => {
-    const amount = parseInt(waterAmount);
-    if (isNaN(amount) || amount <= 0) {
-      Alert.alert("Invalid Amount", "Please enter a valid water amount.");
-      return;
-    }
-    setWaterIntake((prev) => prev + amount);
-    setWaterModal(false);
-    setWaterAmount("");
+    Alert.alert("Loaded!", `${recipe.name} added to your log.`);
   };
 
   const handleSaveGoals = () => {
-    StorageService.saveData(STORAGE_KEYS.NUTRITION_GOALS, dailyGoals);
-    setGoalsModal(false);
-    Alert.alert("Success", "Daily goals updated!");
+    setGoals(editGoals); Storage.save(STORAGE_KEYS.GOALS, editGoals); setGoalsModal(false);
+    Alert.alert("Saved!", "Daily goals updated.");
   };
 
-  const handleClearLog = () => {
-    Alert.alert("Clear Today's Log", "Are you sure? This cannot be undone.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Clear",
-        style: "destructive",
-        onPress: () => {
-          setSelectedFoods([]);
-          setWaterIntake(0);
-          setSupplements([]);
-        },
-      },
-    ]);
-  };
+  const totals = useMemo(() =>
+    foods.reduce((a, f) => ({ calories: a.calories + parseFloat(f.calories || 0), protein: a.protein + parseFloat(f.protein || 0), carbs: a.carbs + parseFloat(f.carbs || 0), fats: a.fats + parseFloat(f.fats || 0) }), { calories: 0, protein: 0, carbs: 0, fats: 0 }),
+    [foods]
+  );
 
-  const totals = useMemo(() => {
-    return selectedFoods.reduce(
-      (acc, food) => ({
-        calories: acc.calories + parseFloat(food.calories || 0),
-        protein: acc.protein + parseFloat(food.protein || 0),
-        carbs: acc.carbs + parseFloat(food.carbs || 0),
-        fats: acc.fats + parseFloat(food.fats || 0),
-      }),
-      { calories: 0, protein: 0, carbs: 0, fats: 0 }
-    );
-  }, [selectedFoods]);
+  const overallPct = goals.calorieGoal > 0 ? Math.min(Math.round((totals.calories / goals.calorieGoal) * 100), 100) : 0;
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-    >
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-        <Animated.View style={{ opacity: fadeAnim }}>
-          {/* Hero Header */}
-          <View style={styles.heroHeader}>
-            <View style={styles.headerTop}>
-              <View>
-                <Text style={styles.heading}>Nutrition Tracker</Text>
-                <Text style={styles.dateText}>
-                  {new Date().toLocaleDateString("en-US", { 
-                    weekday: "long", 
-                    month: "long", 
-                    day: "numeric" 
-                  })}
-                </Text>
+    <>
+      <StatusBar barStyle="light-content" backgroundColor="#667EEA" />
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <ScrollView style={styles.root} showsVerticalScrollIndicator={false}>
+          <Animated.View style={{ opacity: fadeAnim }}>
+
+            {/* ── HEADER ── */}
+            <LinearGradient colors={["#667EEA", "#764BA2"]} style={styles.header} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+              <View style={styles.headerTop}>
+                <View>
+                  <Text style={styles.headerTitle}>Nutrition Tracker</Text>
+                  <Text style={styles.headerDate}>{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</Text>
+                </View>
+                <TouchableOpacity style={styles.settingsBtn} onPress={() => { setEditGoals(goals); setGoalsModal(true); }}>
+                  <Text style={{ fontSize: 20 }}>⚙️</Text>
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity onPress={() => setGoalsModal(true)} style={styles.settingsButton}>
-                <Text style={styles.settingsIcon}>⚙️</Text>
-              </TouchableOpacity>
+
+              {/* Overall score */}
+              <View style={styles.overallRow}>
+                <View style={styles.overallLeft}>
+                  <Text style={styles.overallPct}>{overallPct}%</Text>
+                  <Text style={styles.overallLabel}>of calorie goal</Text>
+                </View>
+                <View style={styles.statsRow}>
+                  <StatChip emoji="🔥" label="Calories" value={Math.round(totals.calories)} unit={`/${goals.calorieGoal}`} color={T.cal} colorBg={T.calBg} />
+                  <StatChip emoji="💪" label="Protein" value={formatNumber(totals.protein)} unit="g" color={T.prot} colorBg={T.protBg} />
+                  <StatChip emoji="💧" label="Water" value={water} unit="ml" color={T.water} colorBg={T.waterBg} />
+                </View>
+              </View>
+            </LinearGradient>
+
+            {/* ── PROGRESS ── */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Daily Progress</Text>
+              <NutrientBar label="Calories" emoji="🔥" current={totals.calories} goal={goals.calorieGoal} color={T.cal} colorBg={T.calBg} />
+              <NutrientBar label="Protein" emoji="💪" current={totals.protein} goal={goals.proteinGoal} color={T.prot} colorBg={T.protBg} />
+              <NutrientBar label="Carbs" emoji="🍞" current={totals.carbs} goal={goals.carbsGoal} color={T.carbs} colorBg={T.carbsBg} />
+              <NutrientBar label="Fats" emoji="🥑" current={totals.fats} goal={goals.fatsGoal} color={T.fat} colorBg={T.fatBg} />
+              <NutrientBar label="Water" emoji="💧" current={water} goal={goals.waterGoal} color={T.water} colorBg={T.waterBg} />
             </View>
 
-            {/* Quick Stats */}
-            <View style={styles.quickStatsRow}>
-              <StatsCard 
-                icon="🔥" 
-                label="Calories" 
-                value={formatNumber(totals.calories)} 
-                unit={`/${dailyGoals.calorieGoal}`}
-                color={COLORS.danger}
-              />
-              <StatsCard 
-                icon="💪" 
-                label="Protein" 
-                value={formatNumber(totals.protein)} 
-                unit="g"
-                color={COLORS.secondary}
-              />
-              <StatsCard 
-                icon="💧" 
-                label="Water" 
-                value={formatNumber(waterIntake)} 
-                unit="ml"
-                color={COLORS.primary}
-              />
-            </View>
-          </View>
-
-          {/* Progress Bars */}
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Daily Progress</Text>
-            <ProgressBar
-              current={totals.calories}
-              goal={dailyGoals.calorieGoal}
-              label="Calories"
-              color="#EF4444"
-              icon="🔥"
-            />
-            <ProgressBar
-              current={totals.protein}
-              goal={dailyGoals.proteinGoal}
-              label="Protein"
-              color="#10B981"
-              icon="💪"
-            />
-            <ProgressBar
-              current={totals.carbs}
-              goal={dailyGoals.carbsGoal}
-              label="Carbs"
-              color="#F59E0B"
-              icon="🍞"
-            />
-            <ProgressBar
-              current={totals.fats}
-              goal={dailyGoals.fatsGoal}
-              label="Fats"
-              color="#8B5CF6"
-              icon="🥑"
-            />
-            <ProgressBar
-              current={waterIntake}
-              goal={dailyGoals.waterGoal}
-              label="Water"
-              color="#3B82F6"
-              icon="💧"
-            />
-          </View>
-
-          {/* Quick Actions */}
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Quick Actions</Text>
-            <View style={styles.quickActionsGrid}>
-              <QuickActionButton 
-                icon="🔍" 
-                label="Search" 
-                onPress={() => {}} 
-                color={COLORS.primary}
-              />
-              <QuickActionButton 
-                icon="✍️" 
-                label="Custom" 
-                onPress={() => setCustomModal(true)} 
-                color={COLORS.purple}
-              />
-              <QuickActionButton 
-                icon="🍲" 
-                label="Recipes" 
-                onPress={() => setLoadRecipeModal(true)} 
-                color={COLORS.secondary}
-              />
-              <QuickActionButton 
-                icon="💧" 
-                label="+250ml" 
-                onPress={() => setWaterIntake((p) => p + 250)} 
-                color="#60A5FA"
-              />
-              <QuickActionButton 
-                icon="💧" 
-                label="+500ml" 
-                onPress={() => setWaterIntake((p) => p + 500)} 
-                color="#3B82F6"
-              />
-              <QuickActionButton 
-                icon="💊" 
-                label="Supplement" 
-                onPress={() => handleAddSupplement("Multivitamin")} 
-                color="#F59E0B"
-              />
-            </View>
-          </View>
-
-          {/* Search Section */}
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Search Foods</Text>
-            <TextInput
-              style={styles.searchInput}
-              placeholder="🔍 Search foods (e.g., chicken breast)..."
-              placeholderTextColor={COLORS.lightGray}
-              value={query}
-              onChangeText={handleSearch}
-              returnKeyType="search"
-            />
-
-            {loading && (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color={COLORS.primary} />
-                <Text style={styles.loadingText}>Searching...</Text>
+            {/* ── QUICK ACTIONS ── */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Quick Actions</Text>
+              <View style={styles.actionsGrid}>
+                {[
+                  { emoji: "✍️", label: "Custom Food",  color: T.fat,   onPress: () => setCustomModal(true) },
+                  { emoji: "🍲", label: "Load Recipe",  color: T.water,  onPress: () => setLoadRecipeModal(true) },
+                  { emoji: "💧", label: "+250ml",       color: T.prot,   onPress: () => setWater((p) => p + 250) },
+                  { emoji: "💧", label: "+500ml",       color: T.accent, onPress: () => setWater((p) => p + 500) },
+                  { emoji: "💊", label: "Multivitamin", color: T.carbs,  onPress: () => setSupplements((p) => [...p, { id: `${Date.now()}`, name: "Multivitamin", time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), timestamp: new Date().toISOString() }]) },
+                  { emoji: "🥤", label: "Protein",      color: T.cal,    onPress: () => setSupplements((p) => [...p, { id: `${Date.now()}`, name: "Protein Shake", time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), timestamp: new Date().toISOString() }]) },
+                ].map((a) => (
+                  <TouchableOpacity key={a.label} style={[styles.actionBtn, { backgroundColor: a.color + "18", borderColor: a.color + "30" }]} onPress={a.onPress} activeOpacity={0.75}>
+                    <Text style={styles.actionEmoji}>{a.emoji}</Text>
+                    <Text style={[styles.actionLabel, { color: a.color }]}>{a.label}</Text>
+                  </TouchableOpacity>
+                ))}
               </View>
-            )}
-            
-            {searchError && (
-              <View style={styles.errorContainer}>
-                <Text style={styles.errorIcon}>⚠️</Text>
-                <Text style={styles.errorText}>{searchError}</Text>
-              </View>
-            )}
+            </View>
 
-            {results.length > 0 && (
-              <View style={styles.resultsContainer}>
-                <Text style={styles.resultsHeader}>Found {results.length} results</Text>
+            {/* ── SEARCH ── */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Search Foods</Text>
+              <View style={styles.searchWrap}>
+                <Text style={styles.searchIcon}>🔍</Text>
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Search foods (e.g., chicken breast)..."
+                  placeholderTextColor={T.textMute}
+                  value={query}
+                  onChangeText={handleSearch}
+                  returnKeyType="search"
+                />
+                {query.length > 0 && (
+                  <TouchableOpacity onPress={() => { setQuery(""); setResults([]); setSearchError(null); }}>
+                    <Text style={styles.searchClear}>✕</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {searching && (
+                <View style={styles.searchState}>
+                  <ActivityIndicator color={T.accent} />
+                  <Text style={styles.searchStateText}>Searching...</Text>
+                </View>
+              )}
+              {searchError && (
+                <View style={[styles.searchState, { backgroundColor: "#FEE2E2" }]}>
+                  <Text>⚠️</Text>
+                  <Text style={[styles.searchStateText, { color: T.danger }]}>{searchError}</Text>
+                </View>
+              )}
+              {results.length > 0 && (
+                <View style={styles.resultsList}>
+                  <Text style={styles.resultsCount}>{results.length} results found</Text>
+                  <FlatList
+                    data={results}
+                    keyExtractor={(item) => item.fdcId.toString()}
+                    renderItem={({ item }) => <FoodResultItem item={item} onPress={() => handleSelectFood(item)} />}
+                    ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: T.border }} />}
+                    scrollEnabled={false}
+                  />
+                </View>
+              )}
+            </View>
+
+            {/* ── TODAY'S LOG ── */}
+            <View style={styles.card}>
+              <View style={styles.cardTitleRow}>
+                <Text style={styles.cardTitle}>Today's Log ({foods.length})</Text>
+                {foods.length > 0 && (
+                  <TouchableOpacity onPress={() => Alert.alert("Clear Log?", "This cannot be undone.", [{ text: "Cancel", style: "cancel" }, { text: "Clear", style: "destructive", onPress: () => { setFoods([]); setWater(0); setSupplements([]); } }])}>
+                    <Text style={styles.clearBtn}>Clear All</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {foods.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyEmoji}>🍽️</Text>
+                  <Text style={styles.emptyTitle}>Nothing logged yet</Text>
+                  <Text style={styles.emptySub}>Search for foods above to get started</Text>
+                </View>
+              ) : (
                 <FlatList
-                  data={results}
-                  keyExtractor={(item) => item.fdcId.toString()}
-                  renderItem={({ item }) => (
-                    <FoodListItem item={item} onPress={() => handleSelectFood(item)} />
-                  )}
-                  ItemSeparatorComponent={() => <View style={styles.separator} />}
+                  data={foods}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => <LoggedItem item={item} onRemove={() => setFoods((p) => p.filter((x) => x.id !== item.id))} />}
                   scrollEnabled={false}
                 />
-              </View>
-            )}
-          </View>
+              )}
 
-          {/* Today's Log */}
-          <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.sectionTitle}>Today's Log ({selectedFoods.length})</Text>
-              {selectedFoods.length > 0 && (
-                <TouchableOpacity onPress={handleClearLog} style={styles.clearButton}>
-                  <Text style={styles.clearButtonText}>Clear All</Text>
+              {foods.length > 0 && (
+                <TouchableOpacity style={styles.saveRecipeBtn} onPress={() => setRecipeModal(true)} activeOpacity={0.8}>
+                  <LinearGradient colors={[T.water, "#0D9F6F"]} style={styles.saveRecipeBtnGrad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+                    <Text style={styles.saveRecipeBtnText}>💾 Save as Recipe</Text>
+                  </LinearGradient>
                 </TouchableOpacity>
               )}
             </View>
 
-            {selectedFoods.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyIcon}>🍽️</Text>
-                <Text style={styles.emptyTitle}>No food logged yet</Text>
-                <Text style={styles.emptyText}>Start by searching for foods above</Text>
-              </View>
-            ) : (
-              <FlatList
-                data={selectedFoods}
-                keyExtractor={(item) => item.id}
-                renderItem={({ item }) => (
-                  <LoggedFoodItem
-                    item={item}
-                    onRemove={() => setSelectedFoods((prev) => prev.filter((x) => x.id !== item.id))}
-                  />
-                )}
-                scrollEnabled={false}
-              />
-            )}
-
-            {selectedFoods.length > 0 && (
-              <TouchableOpacity 
-                style={styles.saveRecipeButton} 
-                onPress={() => setRecipeModal(true)}
-              >
-                <Text style={styles.saveRecipeIcon}>💾</Text>
-                <Text style={styles.saveRecipeText}>Save as Recipe</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {/* Recipes */}
-          {recipes.length > 0 && (
+            {/* ── SUPPLEMENTS ── */}
             <View style={styles.card}>
-              <Text style={styles.sectionTitle}>My Recipes ({recipes.length})</Text>
-              <FlatList
-                data={recipes}
-                keyExtractor={(item) => item.id}
-                renderItem={({ item }) => (
-                  <View style={styles.recipeCard}>
-                    <TouchableOpacity 
-                      style={styles.recipeCardContent} 
-                      onPress={() => handleLoadRecipe(item)}
-                    >
-                      <View style={styles.recipeHeader}>
-                        <Text style={styles.recipeIcon}>🍲</Text>
-                        <View style={styles.recipeInfo}>
-                          <Text style={styles.recipeName}>{item.name}</Text>
-                          <Text style={styles.recipeDetails}>
-                            {item.foods.length} items · {formatNumber(
-                              item.foods.reduce((sum, f) => sum + parseFloat(f.calories || 0), 0)
-                            )} kcal
-                          </Text>
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                      onPress={() => handleDeleteRecipe(item.id)}
-                      style={styles.deleteRecipeButton}
-                    >
-                      <Text style={styles.deleteRecipeIcon}>🗑️</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-                scrollEnabled={false}
-              />
-            </View>
-          )}
-
-          {/* Supplements */}
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Supplements</Text>
-            <View style={styles.supplementGrid}>
-              <TouchableOpacity 
-                style={styles.supplementButton} 
-                onPress={() => handleAddSupplement("Multivitamin")}
-              >
-                <Text style={styles.supplementButtonIcon}>💊</Text>
-                <Text style={styles.supplementButtonText}>Multi</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={styles.supplementButton} 
-                onPress={() => handleAddSupplement("Vitamin D")}
-              >
-                <Text style={styles.supplementButtonIcon}>☀️</Text>
-                <Text style={styles.supplementButtonText}>Vit D</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={styles.supplementButton} 
-                onPress={() => handleAddSupplement("Omega-3")}
-              >
-                <Text style={styles.supplementButtonIcon}>🐟</Text>
-                <Text style={styles.supplementButtonText}>Omega-3</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={styles.supplementButton} 
-                onPress={() => handleAddSupplement("Protein")}
-              >
-                <Text style={styles.supplementButtonIcon}>🥤</Text>
-                <Text style={styles.supplementButtonText}>Protein</Text>
-              </TouchableOpacity>
-            </View>
-
-            {supplements.length > 0 && (
-              <View style={styles.supplementsList}>
-                {supplements.map((s) => (
-                  <View key={s.id} style={styles.supplementItem}>
-                    <View style={styles.supplementItemContent}>
-                      <Text style={styles.supplementItemIcon}>💊</Text>
-                      <View>
-                        <Text style={styles.supplementItemName}>{s.name}</Text>
-                        <Text style={styles.supplementItemTime}>{s.time}</Text>
-                      </View>
-                    </View>
-                    <TouchableOpacity 
-                      onPress={() => setSupplements((prev) => prev.filter((x) => x.id !== s.id))}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    >
-                      <View style={styles.supplementRemoveButton}>
-                        <Text style={styles.supplementRemoveText}>✕</Text>
-                      </View>
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </View>
-            )}
-          </View>
-
-          <View style={{ height: 40 }} />
-        </Animated.View>
-      </ScrollView>
-
-      {/* Food Details Modal */}
-      <Modal visible={modalVisible} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            {loadingDetails ? (
-              <View style={styles.modalLoading}>
-                <ActivityIndicator size="large" color={COLORS.primary} />
-                <Text style={styles.modalLoadingText}>Loading details...</Text>
-              </View>
-            ) : (
-              <ScrollView showsVerticalScrollIndicator={false}>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Add Food</Text>
-                  <TouchableOpacity onPress={() => setModalVisible(false)}>
-                    <Text style={styles.modalClose}>✕</Text>
-                  </TouchableOpacity>
-                </View>
-                
-                <Text style={styles.foodName} numberOfLines={2}>
-                  {foodDetails?.description}
-                </Text>
-
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Quantity (grams)</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    keyboardType="numeric"
-                    placeholder="100"
-                    value={quantity}
-                    onChangeText={calculateMacros}
-                  />
-                </View>
-
-                <View style={styles.macrosGrid}>
-                  <View style={[styles.macroCard, { backgroundColor: '#FEE2E2' }]}>
-                    <Text style={styles.macroCardIcon}>🔥</Text>
-                    <Text style={styles.macroCardValue}>{calculated.calories}</Text>
-                    <Text style={styles.macroCardLabel}>Calories</Text>
-                  </View>
-                  <View style={[styles.macroCard, { backgroundColor: '#D1FAE5' }]}>
-                    <Text style={styles.macroCardIcon}>💪</Text>
-                    <Text style={styles.macroCardValue}>{calculated.protein}g</Text>
-                    <Text style={styles.macroCardLabel}>Protein</Text>
-                  </View>
-                  <View style={[styles.macroCard, { backgroundColor: '#FEF3C7' }]}>
-                    <Text style={styles.macroCardIcon}>🍞</Text>
-                    <Text style={styles.macroCardValue}>{calculated.carbs}g</Text>
-                    <Text style={styles.macroCardLabel}>Carbs</Text>
-                  </View>
-                  <View style={[styles.macroCard, { backgroundColor: '#E0E7FF' }]}>
-                    <Text style={styles.macroCardIcon}>🥑</Text>
-                    <Text style={styles.macroCardValue}>{calculated.fats}g</Text>
-                    <Text style={styles.macroCardLabel}>Fats</Text>
-                  </View>
-                </View>
-
-                <TouchableOpacity style={styles.primaryButton} onPress={handleAddFood}>
-                  <Text style={styles.primaryButtonText}>Add to Log</Text>
-                </TouchableOpacity>
-              </ScrollView>
-            )}
-          </View>
-        </View>
-      </Modal>
-
-      {/* Custom Food Modal */}
-      <Modal visible={customModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Custom Food</Text>
-                <TouchableOpacity onPress={() => setCustomModal(false)}>
-                  <Text style={styles.modalClose}>✕</Text>
-                </TouchableOpacity>
-              </View>
-              
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Food Name *</Text>
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder="e.g., Homemade Pasta"
-                  value={customFood.name}
-                  onChangeText={(t) => setCustomFood({ ...customFood, name: t })}
-                />
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Calories (kcal) *</Text>
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder="500"
-                  keyboardType="numeric"
-                  value={customFood.calories}
-                  onChangeText={(t) => setCustomFood({ ...customFood, calories: t })}
-                />
-              </View>
-
-              <View style={styles.inputRow}>
-                <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
-                  <Text style={styles.inputLabel}>Protein (g)</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    placeholder="25"
-                    keyboardType="numeric"
-                    value={customFood.protein}
-                    onChangeText={(t) => setCustomFood({ ...customFood, protein: t })}
-                  />
-                </View>
-                <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
-                  <Text style={styles.inputLabel}>Carbs (g)</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    placeholder="60"
-                    keyboardType="numeric"
-                    value={customFood.carbs}
-                    onChangeText={(t) => setCustomFood({ ...customFood, carbs: t })}
-                  />
-                </View>
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Fats (g)</Text>
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder="15"
-                  keyboardType="numeric"
-                  value={customFood.fats}
-                  onChangeText={(t) => setCustomFood({ ...customFood, fats: t })}
-                />
-              </View>
-
-              <TouchableOpacity style={styles.primaryButton} onPress={handleAddCustomFood}>
-                <Text style={styles.primaryButtonText}>Save Food</Text>
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Save Recipe Modal */}
-      <Modal visible={recipeModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Save Recipe</Text>
-              <TouchableOpacity onPress={() => setRecipeModal(false)}>
-                <Text style={styles.modalClose}>✕</Text>
-              </TouchableOpacity>
-            </View>
-            
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Recipe Name</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="e.g., Post-Workout Meal"
-                value={recipeName}
-                onChangeText={setRecipeName}
-              />
-            </View>
-
-            <TouchableOpacity style={styles.primaryButton} onPress={handleSaveRecipe}>
-              <Text style={styles.primaryButtonText}>Save Recipe</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Load Recipe Modal */}
-      <Modal visible={loadRecipeModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Load Recipe</Text>
-              <TouchableOpacity onPress={() => setLoadRecipeModal(false)}>
-                <Text style={styles.modalClose}>✕</Text>
-              </TouchableOpacity>
-            </View>
-            
-            {recipes.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyIcon}>🍲</Text>
-                <Text style={styles.emptyTitle}>No recipes saved</Text>
-                <Text style={styles.emptyText}>Save your first recipe to see it here</Text>
-              </View>
-            ) : (
-              <ScrollView style={{ maxHeight: 400 }}>
-                {recipes.map((item) => (
+              <Text style={styles.cardTitle}>Supplements</Text>
+              <View style={styles.suppGrid}>
+                {[
+                  { name: "Multivitamin", emoji: "💊" },
+                  { name: "Vitamin D",    emoji: "☀️" },
+                  { name: "Omega-3",      emoji: "🐟" },
+                  { name: "Protein",      emoji: "🥤" },
+                ].map((s) => (
                   <TouchableOpacity
-                    key={item.id}
-                    style={styles.modalRecipeItem}
-                    onPress={() => handleLoadRecipe(item)}
+                    key={s.name}
+                    style={styles.suppBtn}
+                    onPress={() => setSupplements((p) => [...p, { id: `${Date.now()}-${Math.random()}`, name: s.name, time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), timestamp: new Date().toISOString() }])}
+                    activeOpacity={0.7}
                   >
-                    <Text style={styles.modalRecipeIcon}>🍲</Text>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.modalRecipeName}>{item.name}</Text>
-                      <Text style={styles.modalRecipeInfo}>
-                        {item.foods.length} items · {formatNumber(
-                          item.foods.reduce((sum, f) => sum + parseFloat(f.calories || 0), 0)
-                        )} kcal
-                      </Text>
-                    </View>
-                    <Text style={styles.modalRecipeArrow}>›</Text>
+                    <Text style={styles.suppBtnEmoji}>{s.emoji}</Text>
+                    <Text style={styles.suppBtnName}>{s.name}</Text>
                   </TouchableOpacity>
                 ))}
-              </ScrollView>
-            )}
-          </View>
-        </View>
-      </Modal>
+              </View>
+              {supplements.length > 0 && (
+                <View style={{ marginTop: 14 }}>
+                  {supplements.map((s) => (
+                    <View key={s.id} style={styles.suppItem}>
+                      <Text style={styles.suppItemEmoji}>💊</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.suppItemName}>{s.name}</Text>
+                        <Text style={styles.suppItemTime}>{s.time}</Text>
+                      </View>
+                      <TouchableOpacity onPress={() => setSupplements((p) => p.filter((x) => x.id !== s.id))} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                        <View style={styles.suppRemoveBtn}><Text style={styles.suppRemoveText}>✕</Text></View>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
 
-      {/* Edit Goals Modal */}
-      <Modal visible={goalsModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+            <View style={{ height: 48 }} />
+          </Animated.View>
+        </ScrollView>
+
+        {/* ── FOOD DETAIL SHEET ── */}
+        <Sheet visible={detailModal} onClose={() => setDetailModal(false)} title="Add Food">
+          {loadingDetails ? (
+            <View style={styles.sheetLoading}>
+              <ActivityIndicator size="large" color={T.accent} />
+              <Text style={styles.sheetLoadingText}>Loading details...</Text>
+            </View>
+          ) : (
             <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Daily Goals</Text>
-                <TouchableOpacity onPress={() => setGoalsModal(false)}>
-                  <Text style={styles.modalClose}>✕</Text>
-                </TouchableOpacity>
-              </View>
-              
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>🔥 Calories (kcal)</Text>
-                <TextInput
-                  style={styles.modalInput}
-                  keyboardType="numeric"
-                  value={dailyGoals.calorieGoal.toString()}
-                  onChangeText={(t) => setDailyGoals({ ...dailyGoals, calorieGoal: parseInt(t) || 0 })}
-                />
+              <Text style={styles.sheetFoodName} numberOfLines={3}>{foodDetails?.description}</Text>
+
+              <Text style={styles.sheetInputLabel}>Quantity (grams)</Text>
+              <TextInput style={styles.sheetInput} keyboardType="numeric" placeholder="100" value={quantity} onChangeText={recalc} placeholderTextColor={T.textMute} />
+
+              <View style={styles.macroGrid}>
+                {[
+                  { emoji: "🔥", label: "Calories", value: calc.calories, color: T.cal, bg: T.calBg },
+                  { emoji: "💪", label: "Protein",  value: `${calc.protein}g`, color: T.prot, bg: T.protBg },
+                  { emoji: "🍞", label: "Carbs",    value: `${calc.carbs}g`, color: T.carbs, bg: T.carbsBg },
+                  { emoji: "🥑", label: "Fats",     value: `${calc.fats}g`, color: T.fat, bg: T.fatBg },
+                ].map((m) => (
+                  <View key={m.label} style={[styles.macroCard, { backgroundColor: m.bg }]}>
+                    <Text style={styles.macroCardEmoji}>{m.emoji}</Text>
+                    <Text style={[styles.macroCardValue, { color: m.color }]}>{m.value}</Text>
+                    <Text style={styles.macroCardLabel}>{m.label}</Text>
+                  </View>
+                ))}
               </View>
 
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>💪 Protein (g)</Text>
-                <TextInput
-                  style={styles.modalInput}
-                  keyboardType="numeric"
-                  value={dailyGoals.proteinGoal.toString()}
-                  onChangeText={(t) => setDailyGoals({ ...dailyGoals, proteinGoal: parseInt(t) || 0 })}
-                />
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>🍞 Carbs (g)</Text>
-                <TextInput
-                  style={styles.modalInput}
-                  keyboardType="numeric"
-                  value={(dailyGoals.carbsGoal || 250).toString()}
-                  onChangeText={(t) => setDailyGoals({ ...dailyGoals, carbsGoal: parseInt(t) || 0 })}
-                />
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>🥑 Fats (g)</Text>
-                <TextInput
-                  style={styles.modalInput}
-                  keyboardType="numeric"
-                  value={(dailyGoals.fatsGoal || 65).toString()}
-                  onChangeText={(t) => setDailyGoals({ ...dailyGoals, fatsGoal: parseInt(t) || 0 })}
-                />
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>💧 Water (ml)</Text>
-                <TextInput
-                  style={styles.modalInput}
-                  keyboardType="numeric"
-                  value={dailyGoals.waterGoal.toString()}
-                  onChangeText={(t) => setDailyGoals({ ...dailyGoals, waterGoal: parseInt(t) || 0 })}
-                />
-              </View>
-
-              <TouchableOpacity style={styles.primaryButton} onPress={handleSaveGoals}>
-                <Text style={styles.primaryButtonText}>Save Goals</Text>
+              <TouchableOpacity style={styles.sheetPrimaryBtn} onPress={handleAddFood} activeOpacity={0.85}>
+                <LinearGradient colors={[T.accent, "#764BA2"]} style={styles.sheetPrimaryBtnGrad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+                  <Text style={styles.sheetPrimaryBtnText}>Add to Log</Text>
+                </LinearGradient>
               </TouchableOpacity>
             </ScrollView>
-          </View>
-        </View>
-      </Modal>
+          )}
+        </Sheet>
 
-      {/* Custom Water Modal */}
-      <Modal visible={waterModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add Water</Text>
-              <TouchableOpacity onPress={() => setWaterModal(false)}>
-                <Text style={styles.modalClose}>✕</Text>
-              </TouchableOpacity>
-            </View>
-            
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Amount (ml)</Text>
-              <TextInput
-                style={styles.modalInput}
-                keyboardType="numeric"
-                placeholder="250"
-                value={waterAmount}
-                onChangeText={setWaterAmount}
-              />
-            </View>
-
-            <TouchableOpacity style={styles.primaryButton} onPress={handleAddWater}>
-              <Text style={styles.primaryButtonText}>Add Water</Text>
+        {/* ── CUSTOM FOOD SHEET ── */}
+        <Sheet visible={customModal} onClose={() => setCustomModal(false)} title="Custom Food">
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {[
+              { label: "Food Name *", key: "name", kb: "default", placeholder: "e.g., Homemade Pasta" },
+              { label: "Calories (kcal) *", key: "calories", kb: "numeric", placeholder: "500" },
+              { label: "Protein (g)", key: "protein", kb: "numeric", placeholder: "25" },
+              { label: "Carbs (g)", key: "carbs", kb: "numeric", placeholder: "60" },
+              { label: "Fats (g)", key: "fats", kb: "numeric", placeholder: "15" },
+            ].map((f) => (
+              <View key={f.key} style={{ marginBottom: 16 }}>
+                <Text style={styles.sheetInputLabel}>{f.label}</Text>
+                <TextInput style={styles.sheetInput} keyboardType={f.kb} placeholder={f.placeholder} placeholderTextColor={T.textMute} value={customFood[f.key]} onChangeText={(t) => setCustomFood({ ...customFood, [f.key]: t })} />
+              </View>
+            ))}
+            <TouchableOpacity style={styles.sheetPrimaryBtn} onPress={handleAddCustom} activeOpacity={0.85}>
+              <LinearGradient colors={[T.accent, "#764BA2"]} style={styles.sheetPrimaryBtnGrad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+                <Text style={styles.sheetPrimaryBtnText}>Save Food</Text>
+              </LinearGradient>
             </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    </KeyboardAvoidingView>
+          </ScrollView>
+        </Sheet>
+
+        {/* ── SAVE RECIPE SHEET ── */}
+        <Sheet visible={recipeModal} onClose={() => setRecipeModal(false)} title="Save Recipe">
+          <Text style={styles.sheetInputLabel}>Recipe Name</Text>
+          <TextInput style={styles.sheetInput} placeholder="e.g., Post-Workout Meal" placeholderTextColor={T.textMute} value={recipeName} onChangeText={setRecipeName} />
+          <TouchableOpacity style={[styles.sheetPrimaryBtn, { marginTop: 16 }]} onPress={handleSaveRecipe} activeOpacity={0.85}>
+            <LinearGradient colors={[T.accent, "#764BA2"]} style={styles.sheetPrimaryBtnGrad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+              <Text style={styles.sheetPrimaryBtnText}>Save Recipe</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </Sheet>
+
+        {/* ── LOAD RECIPE SHEET ── */}
+        <Sheet visible={loadRecipeModal} onClose={() => setLoadRecipeModal(false)} title="My Recipes">
+          {recipes.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyEmoji}>🍲</Text>
+              <Text style={styles.emptyTitle}>No recipes yet</Text>
+              <Text style={styles.emptySub}>Save your first recipe from the food log</Text>
+            </View>
+          ) : (
+            <ScrollView style={{ maxHeight: 420 }}>
+              {recipes.map((r) => (
+                <TouchableOpacity key={r.id} style={styles.recipeItem} onPress={() => handleLoadRecipe(r)} activeOpacity={0.7}>
+                  <Text style={styles.recipeItemEmoji}>🍲</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.recipeItemName}>{r.name}</Text>
+                    <Text style={styles.recipeItemInfo}>{r.foods.length} items · {formatNumber(r.foods.reduce((s, f) => s + parseFloat(f.calories || 0), 0))} kcal</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => Alert.alert("Delete?", "Are you sure?", [{ text: "Cancel", style: "cancel" }, { text: "Delete", style: "destructive", onPress: () => setRecipes((p) => p.filter((x) => x.id !== r.id)) }])} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Text style={{ fontSize: 18 }}>🗑️</Text>
+                  </TouchableOpacity>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+        </Sheet>
+
+        {/* ── GOALS SHEET ── */}
+        <Sheet visible={goalsModal} onClose={() => setGoalsModal(false)} title="Daily Goals">
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {[
+              { label: "🔥 Calories (kcal)", key: "calorieGoal" },
+              { label: "💪 Protein (g)",     key: "proteinGoal" },
+              { label: "🍞 Carbs (g)",       key: "carbsGoal" },
+              { label: "🥑 Fats (g)",        key: "fatsGoal" },
+              { label: "💧 Water (ml)",      key: "waterGoal" },
+            ].map((g) => (
+              <View key={g.key} style={{ marginBottom: 16 }}>
+                <Text style={styles.sheetInputLabel}>{g.label}</Text>
+                <TextInput style={styles.sheetInput} keyboardType="numeric" value={editGoals[g.key]?.toString()} placeholderTextColor={T.textMute} onChangeText={(t) => setEditGoals({ ...editGoals, [g.key]: parseInt(t) || 0 })} />
+              </View>
+            ))}
+            <TouchableOpacity style={styles.sheetPrimaryBtn} onPress={handleSaveGoals} activeOpacity={0.85}>
+              <LinearGradient colors={[T.accent, "#764BA2"]} style={styles.sheetPrimaryBtnGrad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+                <Text style={styles.sheetPrimaryBtnText}>Save Goals</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </ScrollView>
+        </Sheet>
+      </KeyboardAvoidingView>
+    </>
   );
 }
 
-// ===== STYLES =====
+// ─── STYLES ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  heroHeader: {
-    backgroundColor: COLORS.white,
-    paddingTop: 50,
-    paddingBottom: 20,
+  root: { flex: 1, backgroundColor: T.bg },
+
+  // header
+  header: {
+    paddingTop: Platform.OS === "ios" ? 58 : 40,
+    paddingBottom: 24,
     paddingHorizontal: 20,
-    borderBottomLeftRadius: 30,
-    borderBottomRightRadius: 30,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+    ...Platform.select({ ios: { shadowColor: "#667EEA", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 16 }, android: { elevation: 10 } }),
   },
-  headerTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 20,
+  headerTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 },
+  headerTitle: { fontSize: 30, fontWeight: "900", color: "#fff", letterSpacing: -0.5 },
+  headerDate: { fontSize: 13, color: "rgba(255,255,255,0.75)", marginTop: 4, fontWeight: "600" },
+  settingsBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
+
+  overallRow: { flexDirection: "row", alignItems: "center", gap: 16 },
+  overallLeft: { alignItems: "center" },
+  overallPct: { fontSize: 38, fontWeight: "900", color: "#fff", lineHeight: 42 },
+  overallLabel: { fontSize: 11, color: "rgba(255,255,255,0.7)", fontWeight: "600", marginTop: 2 },
+  statsRow: { flex: 1, flexDirection: "row", gap: 8 },
+  statChip: {
+    flex: 1, backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 14,
+    paddingVertical: 10, paddingHorizontal: 8, alignItems: "center",
   },
-  heading: {
-    fontSize: 34,
-    fontWeight: "900",
-    color: COLORS.dark,
-    marginBottom: 4,
-  },
-  dateText: {
-    fontSize: 15,
-    color: COLORS.gray,
-    fontWeight: "600",
-  },
-  settingsButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: COLORS.background,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  settingsIcon: {
-    fontSize: 20,
-  },
-  quickStatsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  statsCard: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-    borderRadius: 16,
-    padding: 14,
-    borderLeftWidth: 4,
-    alignItems: "center",
-  },
-  statsIcon: {
-    fontSize: 24,
-    marginBottom: 6,
-  },
-  statsLabel: {
-    fontSize: 11,
-    color: COLORS.gray,
-    fontWeight: "600",
-    marginBottom: 4,
-  },
-  statsValue: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: COLORS.dark,
-  },
-  statsUnit: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: COLORS.lightGray,
-  },
+  statChipEmoji: { fontSize: 18, marginBottom: 4 },
+  statChipValue: { fontSize: 16, fontWeight: "900", color: "#fff" },
+  statChipUnit: { fontSize: 10, color: "rgba(255,255,255,0.7)", fontWeight: "600" },
+  statChipLabel: { fontSize: 10, color: "rgba(255,255,255,0.6)", marginTop: 2, fontWeight: "600" },
+
+  // card
   card: {
-    backgroundColor: COLORS.white,
-    borderRadius: 20,
+    backgroundColor: T.card,
+    borderRadius: 22,
     padding: 20,
     marginHorizontal: 16,
     marginTop: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 3,
+    ...Platform.select({ ios: { shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 12 }, android: { elevation: 3 } }),
   },
-  cardHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 16,
+  cardTitle: { fontSize: 20, fontWeight: "800", color: T.textPrim, marginBottom: 18 },
+  cardTitleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 18 },
+  clearBtn: { fontSize: 13, fontWeight: "700", color: T.danger, backgroundColor: "#FEE2E2", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+
+  // nutrient bar
+  nutrientBar: { marginBottom: 18 },
+  nutrientBarTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  nutrientBarLeft: { flexDirection: "row", alignItems: "center", gap: 8 },
+  nutrientDot: { width: 8, height: 8, borderRadius: 4 },
+  nutrientBarLabel: { fontSize: 14, fontWeight: "700", color: T.textSec },
+  nutrientBarRight: { flexDirection: "row", alignItems: "center", gap: 6 },
+  nutrientCurrent: { fontSize: 15, fontWeight: "800" },
+  nutrientGoalText: { fontSize: 13, color: T.textMute, fontWeight: "600" },
+  pctBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
+  pctBadgeText: { fontSize: 12, fontWeight: "800" },
+  nutrientRemaining: { fontSize: 11, color: T.textMute, fontWeight: "600", marginTop: 5 },
+
+  // actions
+  actionsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  actionBtn: {
+    width: (width - 72) / 3, paddingVertical: 14,
+    borderRadius: 16, alignItems: "center", borderWidth: 1.5,
   },
-  sectionTitle: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: COLORS.dark,
-    marginBottom: 16,
-  },
-  clearButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: "#FEE2E2",
-  },
-  clearButtonText: {
-    color: COLORS.danger,
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  progressContainer: {
-    marginBottom: 20,
-  },
-  progressHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 8,
-  },
-  progressLabelRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  progressIcon: {
-    fontSize: 16,
-  },
-  progressLabel: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: COLORS.gray,
-  },
-  progressValues: {
-    flexDirection: "row",
-    alignItems: "baseline",
-  },
-  progressCurrent: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: COLORS.dark,
-  },
-  progressGoal: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: COLORS.lightGray,
-  },
-  overGoal: {
-    color: COLORS.danger,
-  },
-  progressBarBg: {
-    height: 10,
-    backgroundColor: COLORS.border,
-    borderRadius: 5,
-    overflow: "hidden",
-  },
-  progressBarFill: {
-    height: "100%",
-    borderRadius: 5,
-  },
-  remainingText: {
-    fontSize: 12,
-    color: COLORS.lightGray,
-    marginTop: 4,
-    fontWeight: "600",
-  },
-  quickActionsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  quickActionButton: {
-    width: (width - 72) / 3,
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  quickActionIcon: {
-    fontSize: 24,
-    marginBottom: 6,
-  },
-  quickActionLabel: {
-    color: COLORS.white,
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  disabledButton: {
-    opacity: 0.5,
-  },
-  searchInput: {
-    borderWidth: 2,
-    borderColor: COLORS.border,
-    padding: 16,
-    borderRadius: 14,
-    backgroundColor: COLORS.background,
-    fontSize: 16,
-    color: COLORS.dark,
-    fontWeight: "500",
-  },
-  loadingContainer: {
-    alignItems: "center",
-    paddingVertical: 24,
-  },
-  loadingText: {
-    marginTop: 12,
-    color: COLORS.gray,
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  errorContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#FEE2E2",
-    padding: 14,
-    borderRadius: 12,
-    marginTop: 12,
+  actionEmoji: { fontSize: 22, marginBottom: 5 },
+  actionLabel: { fontSize: 12, fontWeight: "700" },
+
+  // search
+  searchWrap: {
+    flexDirection: "row", alignItems: "center",
+    backgroundColor: T.bg, borderRadius: 14,
+    borderWidth: 1.5, borderColor: T.border,
+    paddingHorizontal: 14, paddingVertical: 2,
     gap: 8,
   },
-  errorIcon: {
-    fontSize: 18,
-  },
-  errorText: {
-    color: COLORS.danger,
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  resultsContainer: {
-    marginTop: 16,
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: COLORS.border,
-    overflow: "hidden",
-    backgroundColor: COLORS.background,
-  },
-  resultsHeader: {
-    padding: 12,
-    backgroundColor: COLORS.white,
-    fontSize: 13,
-    fontWeight: "700",
-    color: COLORS.gray,
-    borderBottomWidth: 2,
-    borderBottomColor: COLORS.border,
-  },
-  resultItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 16,
-    backgroundColor: COLORS.white,
-  },
-  resultItemContent: {
-    flex: 1,
-  },
-  resultText: {
-    fontSize: 16,
-    color: COLORS.dark,
-    fontWeight: "600",
-    marginBottom: 4,
-  },
-  brandText: {
-    fontSize: 13,
-    color: COLORS.gray,
-    fontWeight: "500",
-  },
-  resultArrow: {
-    marginLeft: 12,
-  },
-  arrowText: {
-    fontSize: 24,
-    color: COLORS.lightGray,
-    fontWeight: "300",
-  },
-  separator: {
-    height: 2,
-    backgroundColor: COLORS.border,
-  },
-  emptyState: {
-    alignItems: "center",
-    paddingVertical: 40,
-  },
-  emptyIcon: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: COLORS.dark,
-    marginBottom: 6,
-  },
-  emptyText: {
-    fontSize: 14,
-    color: COLORS.lightGray,
-    fontWeight: "500",
-  },
-  logItem: {
-    flexDirection: "row",
-    backgroundColor: COLORS.background,
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 10,
-    borderWidth: 2,
-    borderColor: COLORS.border,
-  },
-  logItemContent: {
-    flex: 1,
-  },
-  logItemHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 8,
-  },
-  logItemName: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: COLORS.dark,
-    flex: 1,
-    marginRight: 12,
-  },
-  logItemCalories: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: COLORS.primary,
-  },
-  macroRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-    marginBottom: 8,
-  },
-  macroChip: {
-    backgroundColor: "#D1FAE5",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-  },
-  macroChipText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#065F46",
-  },
-  expandedInfo: {
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
-  quantityText: {
-    fontSize: 13,
-    color: COLORS.gray,
-    fontWeight: "600",
-    marginBottom: 4,
-  },
-  detailText: {
-    fontSize: 13,
-    color: COLORS.gray,
-    fontWeight: "500",
-  },
-  timestamp: {
-    fontSize: 12,
-    color: COLORS.lightGray,
-    fontWeight: "600",
-    marginTop: 6,
-  },
-  removeButtonContainer: {
-    marginLeft: 12,
-    justifyContent: "center",
-  },
-  removeButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "#FEE2E2",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  removeButtonText: {
-    color: COLORS.danger,
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  saveRecipeButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: COLORS.secondary,
-    paddingVertical: 14,
-    borderRadius: 14,
-    marginTop: 16,
-    shadowColor: COLORS.secondary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 4,
-  },
-  saveRecipeIcon: {
-    fontSize: 18,
-    marginRight: 8,
-  },
-  saveRecipeText: {
-    color: COLORS.white,
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  recipeCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: COLORS.background,
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 10,
-    borderWidth: 2,
-    borderColor: COLORS.border,
-  },
-  recipeCardContent: {
-    flex: 1,
-  },
-  recipeHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  recipeIcon: {
-    fontSize: 28,
-  },
-  recipeInfo: {
-    flex: 1,
-  },
-  recipeName: {
-    fontSize: 17,
-    fontWeight: "700",
-    color: COLORS.dark,
-    marginBottom: 4,
-  },
-  recipeDetails: {
-    fontSize: 13,
-    color: COLORS.gray,
-    fontWeight: "600",
-  },
-  deleteRecipeButton: {
-    padding: 8,
-    marginLeft: 8,
-  },
-  deleteRecipeIcon: {
-    fontSize: 22,
-  },
-  supplementGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  supplementButton: {
-    width: (width - 72) / 4,
-    paddingVertical: 14,
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: COLORS.border,
-  },
-  supplementButtonIcon: {
-    fontSize: 24,
-    marginBottom: 6,
-  },
-  supplementButtonText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: COLORS.dark,
-  },
-  supplementsList: {
-    marginTop: 16,
-  },
-  supplementItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: COLORS.background,
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 8,
-    borderWidth: 2,
-    borderColor: COLORS.border,
-  },
-  supplementItemContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    flex: 1,
-  },
-  supplementItemIcon: {
-    fontSize: 24,
-  },
-  supplementItemName: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: COLORS.dark,
-    marginBottom: 2,
-  },
-  supplementItemTime: {
-    fontSize: 13,
-    color: COLORS.gray,
-    fontWeight: "600",
-  },
-  supplementRemoveButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: "#FEE2E2",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  supplementRemoveText: {
-    color: COLORS.danger,
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  modalOverlay: {
-    flex: 1,
-    justifyContent: "flex-end",
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-  },
-  modalContent: {
-    backgroundColor: COLORS.white,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    padding: 24,
-    maxHeight: "90%",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 20,
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 24,
-  },
-  modalTitle: {
-    fontSize: 26,
-    fontWeight: "900",
-    color: COLORS.dark,
-  },
-  modalClose: {
-    fontSize: 28,
-    color: COLORS.lightGray,
-    fontWeight: "300",
-  },
-  modalLoading: {
-    alignItems: "center",
-    paddingVertical: 60,
-  },
-  modalLoadingText: {
-    marginTop: 16,
-    fontSize: 15,
-    color: COLORS.gray,
-    fontWeight: "600",
-  },
-  foodName: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: COLORS.dark,
-    marginBottom: 24,
-    lineHeight: 26,
-  },
-  inputGroup: {
-    marginBottom: 20,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: COLORS.gray,
-    marginBottom: 8,
-  },
-  modalInput: {
-    borderWidth: 2,
-    borderColor: COLORS.border,
-    padding: 16,
-    borderRadius: 14,
-    backgroundColor: COLORS.background,
-    fontSize: 16,
-    color: COLORS.dark,
-    fontWeight: "600",
-  },
-  inputRow: {
-    flexDirection: "row",
-  },
-  macrosGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 12,
-    marginBottom: 24,
-  },
-  macroCard: {
-    width: (width - 88) / 2,
-    padding: 16,
-    borderRadius: 16,
-    alignItems: "center",
-  },
-  macroCardIcon: {
-    fontSize: 32,
-    marginBottom: 8,
-  },
-  macroCardValue: {
-    fontSize: 24,
-    fontWeight: "900",
-    color: COLORS.dark,
-    marginBottom: 4,
-  },
-  macroCardLabel: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: COLORS.gray,
-  },
-  primaryButton: {
-    backgroundColor: COLORS.primary,
-    paddingVertical: 18,
-    borderRadius: 14,
-    alignItems: "center",
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  primaryButtonText: {
-    color: COLORS.white,
-    fontSize: 17,
-    fontWeight: "800",
-  },
-  modalRecipeItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 16,
-    backgroundColor: COLORS.background,
-    borderRadius: 14,
-    marginBottom: 10,
-    gap: 14,
-  },
-  modalRecipeIcon: {
-    fontSize: 32,
-  },
-  modalRecipeName: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: COLORS.dark,
-    marginBottom: 4,
-  },
-  modalRecipeInfo: {
-    fontSize: 13,
-    color: COLORS.gray,
-    fontWeight: "600",
-  },
-  modalRecipeArrow: {
-    fontSize: 24,
-    color: COLORS.lightGray,
-    fontWeight: "300",
-  },
-  ringCenter: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ringPercentage: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.dark,
-  },
+  searchIcon: { fontSize: 18 },
+  searchInput: { flex: 1, fontSize: 15, color: T.textPrim, paddingVertical: 14, fontWeight: "500" },
+  searchClear: { fontSize: 16, color: T.textMute, paddingHorizontal: 4 },
+  searchState: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 12, padding: 14, borderRadius: 12, backgroundColor: T.bg },
+  searchStateText: { fontSize: 14, fontWeight: "600", color: T.textSec },
+  resultsList: { marginTop: 14, borderRadius: 14, borderWidth: 1.5, borderColor: T.border, overflow: "hidden" },
+  resultsCount: { padding: 12, fontSize: 12, fontWeight: "700", color: T.textMute, backgroundColor: T.bg, borderBottomWidth: 1, borderBottomColor: T.border },
+  resultItem: { flexDirection: "row", alignItems: "center", padding: 14, backgroundColor: T.card },
+  resultLeft: { flexDirection: "row", alignItems: "center", flex: 1, gap: 12 },
+  resultIconWrap: { width: 40, height: 40, borderRadius: 12, backgroundColor: T.accentSoft, alignItems: "center", justifyContent: "center" },
+  resultIcon: { fontSize: 20 },
+  resultInfo: { flex: 1 },
+  resultName: { fontSize: 15, fontWeight: "700", color: T.textPrim, marginBottom: 3 },
+  resultBrand: { fontSize: 12, color: T.textSec, fontWeight: "500" },
+  resultChevron: { fontSize: 24, color: T.textMute, fontWeight: "300" },
+
+  // log items
+  logItem: { flexDirection: "row", backgroundColor: T.bg, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1.5, borderColor: T.border },
+  logItemHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 },
+  logItemName: { fontSize: 15, fontWeight: "700", color: T.textPrim, flex: 1, marginRight: 10 },
+  logItemCal: { fontSize: 15, fontWeight: "800" },
+  macroRow: { flexDirection: "row", gap: 6, flexWrap: "wrap", marginBottom: 6 },
+  macroChip: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8 },
+  macroChipText: { fontSize: 12, fontWeight: "700" },
+  logItemExpanded: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: T.border },
+  logItemDetail: { fontSize: 13, color: T.textSec, fontWeight: "500", marginBottom: 2 },
+  logItemTime: { fontSize: 11, color: T.textMute, fontWeight: "600", marginTop: 4 },
+  removeBtn: { marginLeft: 10, alignSelf: "center", width: 30, height: 30, borderRadius: 15, backgroundColor: "#FEE2E2", alignItems: "center", justifyContent: "center" },
+  removeBtnText: { color: T.danger, fontSize: 14, fontWeight: "800" },
+
+  saveRecipeBtn: { borderRadius: 14, overflow: "hidden", marginTop: 14, ...Platform.select({ ios: { shadowColor: T.water, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8 }, android: { elevation: 4 } }) },
+  saveRecipeBtnGrad: { paddingVertical: 16, alignItems: "center" },
+  saveRecipeBtnText: { color: "#fff", fontSize: 16, fontWeight: "800" },
+
+  // empty
+  emptyState: { alignItems: "center", paddingVertical: 40 },
+  emptyEmoji: { fontSize: 48, marginBottom: 12 },
+  emptyTitle: { fontSize: 18, fontWeight: "700", color: T.textPrim, marginBottom: 6 },
+  emptySub: { fontSize: 14, color: T.textMute, fontWeight: "500" },
+
+  // supplements
+  suppGrid: { flexDirection: "row", gap: 10, flexWrap: "wrap" },
+  suppBtn: { width: (width - 72) / 4, paddingVertical: 14, backgroundColor: T.bg, borderRadius: 14, alignItems: "center", borderWidth: 1.5, borderColor: T.border },
+  suppBtnEmoji: { fontSize: 22, marginBottom: 4 },
+  suppBtnName: { fontSize: 11, fontWeight: "700", color: T.textPrim },
+  suppItem: { flexDirection: "row", alignItems: "center", backgroundColor: T.bg, borderRadius: 12, padding: 12, marginBottom: 8, borderWidth: 1.5, borderColor: T.border },
+  suppItemEmoji: { fontSize: 22, marginRight: 10 },
+  suppItemName: { fontSize: 14, fontWeight: "700", color: T.textPrim },
+  suppItemTime: { fontSize: 12, color: T.textSec, fontWeight: "500" },
+  suppRemoveBtn: { width: 26, height: 26, borderRadius: 13, backgroundColor: "#FEE2E2", alignItems: "center", justifyContent: "center" },
+  suppRemoveText: { color: T.danger, fontSize: 13, fontWeight: "800" },
+
+  // sheet (modal)
+  sheetOverlay: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.45)" },
+  sheet: { backgroundColor: T.card, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, maxHeight: "92%", ...Platform.select({ ios: { shadowColor: "#000", shadowOffset: { width: 0, height: -6 }, shadowOpacity: 0.15, shadowRadius: 20 }, android: { elevation: 20 } }) },
+  sheetHandle: { width: 40, height: 4, backgroundColor: T.border, borderRadius: 2, alignSelf: "center", marginBottom: 20 },
+  sheetHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 22 },
+  sheetTitle: { fontSize: 24, fontWeight: "900", color: T.textPrim },
+  sheetClose: { width: 36, height: 36, borderRadius: 18, backgroundColor: T.bg, alignItems: "center", justifyContent: "center" },
+  sheetCloseText: { fontSize: 18, color: T.textMute, fontWeight: "600" },
+  sheetLoading: { alignItems: "center", paddingVertical: 60 },
+  sheetLoadingText: { marginTop: 16, fontSize: 15, color: T.textSec, fontWeight: "600" },
+  sheetFoodName: { fontSize: 17, fontWeight: "700", color: T.textPrim, marginBottom: 20, lineHeight: 24 },
+  sheetInputLabel: { fontSize: 13, fontWeight: "700", color: T.textSec, marginBottom: 8 },
+  sheetInput: { borderWidth: 1.5, borderColor: T.border, backgroundColor: T.bg, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14, fontSize: 16, color: T.textPrim, fontWeight: "600" },
+  sheetPrimaryBtn: { borderRadius: 14, overflow: "hidden", marginTop: 8, ...Platform.select({ ios: { shadowColor: T.accent, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 12 }, android: { elevation: 6 } }) },
+  sheetPrimaryBtnGrad: { paddingVertical: 18, alignItems: "center" },
+  sheetPrimaryBtnText: { color: "#fff", fontSize: 17, fontWeight: "800" },
+
+  macroGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12, marginVertical: 20 },
+  macroCard: { width: (width - 88) / 2, padding: 16, borderRadius: 16, alignItems: "center" },
+  macroCardEmoji: { fontSize: 28, marginBottom: 6 },
+  macroCardValue: { fontSize: 22, fontWeight: "900", marginBottom: 4 },
+  macroCardLabel: { fontSize: 12, fontWeight: "700", color: T.textSec },
+
+  recipeItem: { flexDirection: "row", alignItems: "center", backgroundColor: T.bg, borderRadius: 14, padding: 14, marginBottom: 10, gap: 12, borderWidth: 1.5, borderColor: T.border },
+  recipeItemEmoji: { fontSize: 28 },
+  recipeItemName: { fontSize: 15, fontWeight: "700", color: T.textPrim, marginBottom: 3 },
+  recipeItemInfo: { fontSize: 12, color: T.textSec, fontWeight: "600" },
 });

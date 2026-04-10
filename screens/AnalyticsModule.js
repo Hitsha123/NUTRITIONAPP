@@ -19,7 +19,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BarChart, PieChart, LineChart } from "react-native-chart-kit";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
-import RNFS from 'react-native-fs';
+import RNFS from "react-native-fs";
 
 const SCREEN_WIDTH = Dimensions.get("window").width - 40;
 const LAST_REFRESH_KEY = "last_analytics_refresh";
@@ -39,15 +39,15 @@ const chartConfig = {
   color: (opacity = 1) => `rgba(76, 175, 80, ${opacity})`,
   labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
   style: { borderRadius: 16 },
-  propsForLabels: { 
+  propsForLabels: {
     fontSize: 11,
     fill: "#000000",
-    fontWeight: "500"
+    fontWeight: "500",
   },
   propsForBackgroundLines: {
     stroke: "#e3e3e3",
     strokeWidth: 1,
-    strokeDasharray: "5,5"
+    strokeDasharray: "5,5",
   },
 };
 
@@ -73,6 +73,10 @@ export default function AnalyticsModule() {
     fats: 0,
   });
   const [weeklyMeals, setWeeklyMeals] = useState([]);
+
+  // ✅ NEW: Store ALL meals grouped by date for export
+  const [allMealsByDate, setAllMealsByDate] = useState({});
+
   const [reportData, setReportData] = useState({
     weekly: { labels: [], datasets: [{ data: [] }] },
     monthly: { labels: [], datasets: [{ data: [] }] },
@@ -84,13 +88,13 @@ export default function AnalyticsModule() {
     carbs: 0,
     fats: 0,
   });
-  
+
   const appState = useRef(AppState.currentState);
   const checkIntervalRef = useRef(null);
 
   // Request storage permission for Android
   const requestStoragePermission = async () => {
-    if (Platform.OS === 'android') {
+    if (Platform.OS === "android") {
       try {
         if (Platform.Version >= 33) {
           return true;
@@ -98,12 +102,12 @@ export default function AnalyticsModule() {
         const granted = await PermissionsAndroid.request(
           PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
           {
-            title: 'Storage Permission',
-            message: 'App needs access to storage to save PDF reports',
-            buttonNeutral: 'Ask Me Later',
-            buttonNegative: 'Cancel',
-            buttonPositive: 'OK',
-          },
+            title: "Storage Permission",
+            message: "App needs access to storage to save PDF reports",
+            buttonNeutral: "Ask Me Later",
+            buttonNegative: "Cancel",
+            buttonPositive: "OK",
+          }
         );
         return granted === PermissionsAndroid.RESULTS.GRANTED;
       } catch (err) {
@@ -119,7 +123,7 @@ export default function AnalyticsModule() {
     try {
       const lastRefresh = await AsyncStorage.getItem(LAST_REFRESH_KEY);
       const today = new Date().toISOString().split("T")[0];
-      
+
       if (lastRefresh !== today) {
         console.log("New day detected, refreshing analytics...");
         await AsyncStorage.setItem(LAST_REFRESH_KEY, today);
@@ -187,8 +191,11 @@ export default function AnalyticsModule() {
       }
 
       const dailyTotals = {};
-      const dailyMeals = {};
-      
+      const dailyMeals = {}; // last 7 days (for charts/UI)
+
+      // ✅ NEW: Group ALL meals by date (no date limit) for export
+      const allMealsGrouped = {};
+
       let todaySum = { calories: 0, protein: 0, carbs: 0, fats: 0 };
       let weeklySum = { calories: 0, protein: 0, carbs: 0, fats: 0 };
       let weeklyDays = 0;
@@ -202,9 +209,21 @@ export default function AnalyticsModule() {
 
         if (!dateKey) return;
 
+        // ✅ Group every meal by date regardless of age
+        if (!allMealsGrouped[dateKey]) {
+          allMealsGrouped[dateKey] = [];
+        }
+        allMealsGrouped[dateKey].push(meal);
+
+        // Chart / stats data limited to last 30 days
         if (last30Days.includes(dateKey)) {
           if (!dailyTotals[dateKey]) {
-            dailyTotals[dateKey] = { calories: 0, protein: 0, carbs: 0, fats: 0 };
+            dailyTotals[dateKey] = {
+              calories: 0,
+              protein: 0,
+              carbs: 0,
+              fats: 0,
+            };
           }
 
           dailyTotals[dateKey].calories += Number(meal.calories) || 0;
@@ -236,7 +255,7 @@ export default function AnalyticsModule() {
       });
 
       // Count days with meals
-      last7Days.forEach(day => {
+      last7Days.forEach((day) => {
         if (dailyMeals[day] && dailyMeals[day].length > 0) {
           weeklyDays++;
         }
@@ -252,6 +271,9 @@ export default function AnalyticsModule() {
 
       setTodayTotals(todaySum);
       setWeeklyMeals(dailyMeals);
+
+      // ✅ Save ALL meals grouped by date into state for export
+      setAllMealsByDate(allMealsGrouped);
 
       // Macro distribution
       const totalMacros = todaySum.protein + todaySum.carbs + todaySum.fats;
@@ -290,7 +312,9 @@ export default function AnalyticsModule() {
         const d = new Date();
         d.setDate(today.getDate() - i);
         const key = d.toISOString().split("T")[0];
-        weeklyLabels.push(d.toLocaleDateString("en-US", { weekday: "short" }));
+        weeklyLabels.push(
+          d.toLocaleDateString("en-US", { weekday: "short" })
+        );
         weeklyCalories.push(dailyTotals[key]?.calories || 0);
       }
 
@@ -303,14 +327,24 @@ export default function AnalyticsModule() {
       });
 
       setReportData({
-        weekly: { labels: weeklyLabels, datasets: [{ data: weeklyCalories.length > 0 ? weeklyCalories : [0] }] },
+        weekly: {
+          labels: weeklyLabels,
+          datasets: [
+            { data: weeklyCalories.length > 0 ? weeklyCalories : [0] },
+          ],
+        },
         monthly: {
           labels: monthlyLabels,
-          datasets: [{ data: monthlyCalories.length > 0 ? monthlyCalories : [0] }],
+          datasets: [
+            { data: monthlyCalories.length > 0 ? monthlyCalories : [0] },
+          ],
         },
       });
 
-      await AsyncStorage.setItem(LAST_REFRESH_KEY, today.toISOString().split("T")[0]);
+      await AsyncStorage.setItem(
+        LAST_REFRESH_KEY,
+        today.toISOString().split("T")[0]
+      );
     } catch (e) {
       console.error(e);
       Alert.alert("❌ Error", "Failed to load analytics");
@@ -331,30 +365,66 @@ export default function AnalyticsModule() {
 
   const getHealthStatus = (nutrient, value) => {
     const guide = GUIDELINES[nutrient];
-    if (value < guide.min) return { status: "Low", color: "#F97316", icon: "alert-circle", emoji: "⚠️" };
-    if (value > guide.max) return { status: "High", color: "#EF4444", icon: "alert", emoji: "🔴" };
-    return { status: "Good", color: "#10B981", icon: "check-circle", emoji: "✅" };
+    if (value < guide.min)
+      return {
+        status: "Low",
+        color: "#F97316",
+        icon: "alert-circle",
+        emoji: "⚠️",
+      };
+    if (value > guide.max)
+      return {
+        status: "High",
+        color: "#EF4444",
+        icon: "alert",
+        emoji: "🔴",
+      };
+    return {
+      status: "Good",
+      color: "#10B981",
+      icon: "check-circle",
+      emoji: "✅",
+    };
   };
 
+  // ✅ FIXED: generateHTMLContent now uses allMealsByDate
+  // so it includes every logged meal, not just the last 7 days
   const generateHTMLContent = () => {
-    const today = new Date();
-    const dateRange = `${new Date(today.setDate(today.getDate() - 6)).toLocaleDateString()} - ${new Date().toLocaleDateString()}`;
+    // Sort all dates descending (newest first)
+    const sortedDates = Object.keys(allMealsByDate).sort(
+      (a, b) => new Date(b) - new Date(a)
+    );
 
+    const startDate =
+      sortedDates.length > 0
+        ? new Date(sortedDates[sortedDates.length - 1]).toLocaleDateString()
+        : "N/A";
+    const endDate =
+      sortedDates.length > 0
+        ? new Date(sortedDates[0]).toLocaleDateString()
+        : "N/A";
+    const dateRange = `${startDate} – ${endDate}`;
+
+    // Build HTML rows for every date that has meals
     let mealsHTML = "";
-    
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(new Date().getDate() - i);
-      const key = d.toISOString().split("T")[0];
-      const dayMeals = weeklyMeals[key] || [];
-      const dayName = d.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
 
-      let dayTotal = { calories: 0, protein: 0, carbs: 0, fats: 0 };
-      let mealRows = "";
+    if (sortedDates.length === 0) {
+      mealsHTML =
+        '<p style="text-align:center; color:#999; font-style:italic;">No meals logged yet.</p>';
+    } else {
+      sortedDates.forEach((key) => {
+        const dayMeals = allMealsByDate[key] || [];
+        const dayDate = new Date(key + "T00:00:00"); // force local date parse
+        const dayName = dayDate.toLocaleDateString("en-US", {
+          weekday: "long",
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        });
 
-      if (dayMeals.length === 0) {
-        mealRows = '<tr><td colspan="5" style="text-align: center; color: #999; padding: 20px; font-style: italic;">No meals logged this day</td></tr>';
-      } else {
+        let dayTotal = { calories: 0, protein: 0, carbs: 0, fats: 0 };
+        let mealRows = "";
+
         dayMeals.forEach((meal, idx) => {
           dayTotal.calories += Number(meal.calories) || 0;
           dayTotal.protein += Number(meal.protein) || 0;
@@ -382,30 +452,30 @@ export default function AnalyticsModule() {
             <td style="text-align: center; color: #D97706; font-size: 15px;">${Math.round(dayTotal.fats)}g</td>
           </tr>
         `;
-      }
 
-      mealsHTML += `
-        <div class="day-section">
-          <h3 style="color: #10B981; margin: 25px 0 15px 0; border-bottom: 3px solid #10B981; padding-bottom: 10px; display: flex; align-items: center; font-size: 18px;">
-            <span style="margin-right: 10px;">📅</span> ${dayName}
-          </h3>
-          <table>
-            <thead>
-              <tr>
-                <th style="width: 50px; text-align: center;">#</th>
-                <th>Food Item</th>
-                <th style="width: 90px; text-align: center;">🔥 Calories</th>
-                <th style="width: 90px; text-align: center;">💪 Protein</th>
-                <th style="width: 90px; text-align: center;">🍞 Carbs</th>
-                <th style="width: 90px; text-align: center;">🥑 Fats</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${mealRows}
-            </tbody>
-          </table>
-        </div>
-      `;
+        mealsHTML += `
+          <div class="day-section">
+            <h3 style="color: #10B981; margin: 25px 0 15px 0; border-bottom: 3px solid #10B981; padding-bottom: 10px; display: flex; align-items: center; font-size: 18px;">
+              <span style="margin-right: 10px;">📅</span> ${dayName}
+            </h3>
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 50px; text-align: center;">#</th>
+                  <th>Food Item</th>
+                  <th style="width: 90px; text-align: center;">🔥 Calories</th>
+                  <th style="width: 90px; text-align: center;">💪 Protein</th>
+                  <th style="width: 90px; text-align: center;">🍞 Carbs</th>
+                  <th style="width: 90px; text-align: center;">🥑 Fats</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${mealRows}
+              </tbody>
+            </table>
+          </div>
+        `;
+      });
     }
 
     const caloriesStatus = getHealthStatus("calories", todayTotals.calories);
@@ -468,7 +538,6 @@ export default function AnalyticsModule() {
             border-radius: 16px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.1);
             border-left: 5px solid #10B981;
-            transition: transform 0.3s ease;
           }
           
           .summary-card h3 {
@@ -598,10 +667,6 @@ export default function AnalyticsModule() {
             border-bottom: 1px solid #E5E7EB;
           }
           
-          tbody tr:hover {
-            background-color: #F9FAFB;
-          }
-          
           tbody tr:last-child td {
             border-bottom: none;
           }
@@ -620,23 +685,24 @@ export default function AnalyticsModule() {
           }
           
           @media print {
-            body {
-              background: white;
-            }
+            body { background: white; }
           }
         </style>
       </head>
       <body>
         <div class="header">
-          <h1>🍎 Weekly Nutrition Report</h1>
-          <p style="font-size: 18px; margin-top: 8px;">${dateRange}</p>
+          <h1>🍎 Complete Nutrition Report</h1>
+          <p style="font-size: 18px; margin-top: 8px;">All logged meals: ${dateRange}</p>
           <p style="font-size: 14px; margin-top: 8px; opacity: 0.9;">
-            Generated on ${new Date().toLocaleDateString("en-US", { 
-              weekday: "long", 
-              year: "numeric", 
-              month: "long", 
-              day: "numeric" 
+            Generated on ${new Date().toLocaleDateString("en-US", {
+              weekday: "long",
+              year: "numeric",
+              month: "long",
+              day: "numeric",
             })}
+          </p>
+          <p style="font-size: 13px; margin-top: 6px; opacity: 0.85;">
+            📅 ${sortedDates.length} day${sortedDates.length !== 1 ? "s" : ""} of data included
           </p>
         </div>
 
@@ -690,7 +756,7 @@ export default function AnalyticsModule() {
         </div>
 
         <h2 style="color: #10B981; margin-bottom: 25px; font-size: 26px; text-align: center;">
-          📋 Detailed Daily Food Log
+          📋 Complete Food Log (All Time)
         </h2>
         
         ${mealsHTML}
@@ -712,26 +778,35 @@ export default function AnalyticsModule() {
 
       const hasPermission = await requestStoragePermission();
       if (!hasPermission) {
-        Alert.alert("❌ Permission Denied", "Storage permission is required to export PDF");
+        Alert.alert(
+          "❌ Permission Denied",
+          "Storage permission is required to export PDF"
+        );
         setExporting(false);
         return;
       }
 
       const htmlContent = generateHTMLContent();
-      const fileName = `Nutrition_Report_${new Date().toISOString().split("T")[0]}.html`;
-      
+      const fileName = `Nutrition_Report_${
+        new Date().toISOString().split("T")[0]
+      }.html`;
+
       let filePath;
-      if (Platform.OS === 'android') {
+      if (Platform.OS === "android") {
         filePath = `${RNFS.DownloadDirectoryPath}/${fileName}`;
       } else {
         filePath = `${RNFS.DocumentDirectoryPath}/${fileName}`;
       }
 
-      await RNFS.writeFile(filePath, htmlContent, 'utf8');
+      await RNFS.writeFile(filePath, htmlContent, "utf8");
 
       Alert.alert(
         "✅ Export Successful",
-        `Report saved as:\n${fileName}\n\n${Platform.OS === 'android' ? 'Location: Downloads folder' : 'Location: Documents folder'}`,
+        `Report saved as:\n${fileName}\n\n${
+          Platform.OS === "android"
+            ? "Location: Downloads folder"
+            : "Location: Documents folder"
+        }`,
         [
           { text: "OK" },
           {
@@ -739,22 +814,24 @@ export default function AnalyticsModule() {
             onPress: async () => {
               try {
                 await Share.share({
-                  url: Platform.OS === 'ios' ? filePath : `file://${filePath}`,
-                  title: '📊 Nutrition Report',
-                  message: '🍎 My weekly nutrition report',
+                  url:
+                    Platform.OS === "ios"
+                      ? filePath
+                      : `file://${filePath}`,
+                  title: "📊 Nutrition Report",
+                  message: "🍎 My complete nutrition report",
                 });
               } catch (shareError) {
-                console.error('Share error:', shareError);
+                console.error("Share error:", shareError);
               }
             },
           },
         ]
       );
-
     } catch (error) {
-      console.error('Export error:', error);
+      console.error("Export error:", error);
       Alert.alert(
-        "❌ Export Failed", 
+        "❌ Export Failed",
         `Could not export report.\n\nError: ${error.message}\n\nTip: Make sure you have granted storage permissions in your device settings.`
       );
     } finally {
@@ -791,7 +868,6 @@ export default function AnalyticsModule() {
     );
   }
 
-  // Main analytics screen
   const chartData =
     selectedPeriod === "weekly" ? reportData.weekly : reportData.monthly;
 
@@ -801,9 +877,9 @@ export default function AnalyticsModule() {
       <ScrollView
         contentContainerStyle={{ padding: 20 }}
         refreshControl={
-          <RefreshControl 
-            refreshing={refreshing} 
-            onRefresh={onRefresh} 
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
             colors={["#10B981"]}
             tintColor="#10B981"
           />
@@ -816,10 +892,7 @@ export default function AnalyticsModule() {
               <Text style={styles.title}>📊 Health Analytics</Text>
               <Text style={styles.subtitle}>Track your nutrition journey</Text>
             </View>
-            <TouchableOpacity 
-              onPress={onRefresh}
-              style={styles.refreshButton}
-            >
+            <TouchableOpacity onPress={onRefresh} style={styles.refreshButton}>
               <Text style={styles.refreshButtonText}>🔄</Text>
             </TouchableOpacity>
           </View>
@@ -829,26 +902,69 @@ export default function AnalyticsModule() {
         <Text style={styles.sectionTitle}>📊 Today's Intake</Text>
         <View style={styles.summaryGrid}>
           {[
-            { key: "calories", label: "🔥 Calories", unit: "", icon: "fire", gradient: ["#EF4444", "#DC2626"] },
-            { key: "protein", label: "💪 Protein", unit: "g", icon: "food-drumstick", gradient: ["#8B5CF6", "#7C3AED"] },
-            { key: "carbs", label: "🍞 Carbs", unit: "g", icon: "bread-slice", gradient: ["#3B82F6", "#2563EB"] },
-            { key: "fats", label: "🥑 Fats", unit: "g", icon: "oil", gradient: ["#F59E0B", "#D97706"] },
+            {
+              key: "calories",
+              label: "🔥 Calories",
+              unit: "",
+              icon: "fire",
+              gradient: ["#EF4444", "#DC2626"],
+            },
+            {
+              key: "protein",
+              label: "💪 Protein",
+              unit: "g",
+              icon: "food-drumstick",
+              gradient: ["#8B5CF6", "#7C3AED"],
+            },
+            {
+              key: "carbs",
+              label: "🍞 Carbs",
+              unit: "g",
+              icon: "bread-slice",
+              gradient: ["#3B82F6", "#2563EB"],
+            },
+            {
+              key: "fats",
+              label: "🥑 Fats",
+              unit: "g",
+              icon: "oil",
+              gradient: ["#F59E0B", "#D97706"],
+            },
           ].map((item) => {
             const status = getHealthStatus(item.key, todayTotals[item.key]);
             return (
-              <View key={item.key} style={[styles.summaryCard, { borderLeftColor: item.gradient[0] }]}>
-                <Text style={styles.cardEmoji}>{item.label.split(' ')[0]}</Text>
+              <View
+                key={item.key}
+                style={[
+                  styles.summaryCard,
+                  { borderLeftColor: item.gradient[0] },
+                ]}
+              >
+                <Text style={styles.cardEmoji}>
+                  {item.label.split(" ")[0]}
+                </Text>
                 <Text style={styles.summaryLabel}>{item.label}</Text>
-                <Text style={[styles.summaryValue, { color: item.gradient[0] }]}>
+                <Text
+                  style={[
+                    styles.summaryValue,
+                    { color: item.gradient[0] },
+                  ]}
+                >
                   {Math.round(todayTotals[item.key])}
                   <Text style={styles.unit}>{item.unit}</Text>
                 </Text>
-                <View style={[styles.statusBadge, { backgroundColor: status.color }]}>
+                <View
+                  style={[
+                    styles.statusBadge,
+                    { backgroundColor: status.color },
+                  ]}
+                >
                   <Text style={styles.statusEmoji}>{status.emoji}</Text>
                   <Text style={styles.statusText}>{status.status}</Text>
                 </View>
                 <Text style={styles.targetText}>
-                  🎯 Target: {GUIDELINES[item.key].optimal}{item.unit}
+                  🎯 Target: {GUIDELINES[item.key].optimal}
+                  {item.unit}
                 </Text>
               </View>
             );
@@ -889,7 +1005,7 @@ export default function AnalyticsModule() {
         <View style={styles.switchRow}>
           {[
             { key: "weekly", label: "7 Days", emoji: "📅" },
-            { key: "monthly", label: "30 Days", emoji: "📆" }
+            { key: "monthly", label: "30 Days", emoji: "📆" },
           ].map((period) => (
             <TouchableOpacity
               key={period.key}
@@ -919,15 +1035,18 @@ export default function AnalyticsModule() {
             <Text style={styles.chartEmoji}>📊</Text>
             <Text style={styles.chartTitle}>Calorie Intake Trends</Text>
           </View>
-          <ScrollView 
-            horizontal 
+          <ScrollView
+            horizontal
             showsHorizontalScrollIndicator={true}
             persistentScrollbar={true}
             style={styles.chartScrollView}
           >
             <LineChart
               data={chartData}
-              width={Math.max(SCREEN_WIDTH, chartData.labels.length * 70)}
+              width={Math.max(
+                SCREEN_WIDTH,
+                chartData.labels.length * 70
+              )}
               height={250}
               fromZero
               chartConfig={gradientChartConfig}
@@ -944,7 +1063,8 @@ export default function AnalyticsModule() {
             />
           </ScrollView>
           <Text style={styles.chartHint}>
-            👆 Swipe to explore {selectedPeriod === "weekly" ? "7" : "30"} days of data
+            👆 Swipe to explore{" "}
+            {selectedPeriod === "weekly" ? "7" : "30"} days of data
           </Text>
         </View>
 
@@ -953,7 +1073,9 @@ export default function AnalyticsModule() {
           <View style={styles.chartContainer}>
             <View style={styles.chartHeader}>
               <Text style={styles.chartEmoji}>🥧</Text>
-              <Text style={styles.chartTitle}>Today's Macro Distribution</Text>
+              <Text style={styles.chartTitle}>
+                Today's Macro Distribution
+              </Text>
             </View>
             <PieChart
               data={macroDistribution}
@@ -985,7 +1107,7 @@ export default function AnalyticsModule() {
             ) : (
               <>
                 <Text style={styles.btnEmoji}>📄</Text>
-                <Text style={styles.btnText}>Export Report</Text>
+                <Text style={styles.btnText}>Export Full Report</Text>
               </>
             )}
           </TouchableOpacity>
@@ -1014,15 +1136,15 @@ export default function AnalyticsModule() {
 }
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: "#F9FAFB" 
+  container: {
+    flex: 1,
+    backgroundColor: "#F9FAFB",
   },
-  centered: { 
-    flex: 1, 
-    justifyContent: "center", 
+  centered: {
+    flex: 1,
+    justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#F9FAFB"
+    backgroundColor: "#F9FAFB",
   },
   loadingText: {
     marginTop: 12,

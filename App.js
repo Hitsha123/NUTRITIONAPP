@@ -18,6 +18,7 @@ import GoalManagementScreen from './screens/GoalManagementScreen';
 import RecommendationModule from './screens/RecommendationModule';
 import AnalyticsModule from './screens/AnalyticsModule';
 import NotificationSettingsScreen from './screens/NotificationSettingsScreen';
+import AboutTeamScreen from './screens/AboutTeamScreen'; // 👈 NEW
 
 const Stack = createNativeStackNavigator();
 
@@ -70,6 +71,8 @@ export default function App() {
               name="NotificationSettingsScreen"
               component={NotificationSettingsScreen}
             />
+            {/* 👥 Meet the Team / About Screen */}
+            <Stack.Screen name="AboutTeamScreen" component={AboutTeamScreen} />
           </>
         )}
 

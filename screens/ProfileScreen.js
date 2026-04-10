@@ -18,6 +18,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { launchImageLibrary } from "react-native-image-picker";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import LinearGradient from "react-native-linear-gradient";
+import auth from "@react-native-firebase/auth"; // ✅ ADDED: Firebase Auth import
 
 /* =======================
    GOAL CALCULATION LOGIC
@@ -71,7 +72,7 @@ export default function ProfileScreen({ navigation }) {
   ======================= */
   useEffect(() => {
     loadProfile();
-    
+
     // Entrance animation
     Animated.parallel([
       Animated.timing(fadeAnim, {
@@ -92,10 +93,20 @@ export default function ProfileScreen({ navigation }) {
     try {
       setLoading(true);
       const stored = await AsyncStorage.getItem("userProfile");
-      
+
       if (stored) {
         const parsedProfile = JSON.parse(stored);
         setProfile(parsedProfile);
+      } else {
+        // ✅ ADDED: Pre-fill from Firebase Auth if no local profile exists
+        const currentUser = auth().currentUser;
+        if (currentUser) {
+          setProfile((prev) => ({
+            ...prev,
+            name: currentUser.displayName || "",
+            email: currentUser.email || "",
+          }));
+        }
       }
     } catch (err) {
       console.error("Error loading profile:", err);
@@ -110,15 +121,21 @@ export default function ProfileScreen({ navigation }) {
   ======================= */
   const pickImage = async () => {
     try {
-      const result = await launchImageLibrary({ 
-        mediaType: "photo", 
+      const result = await launchImageLibrary({
+        mediaType: "photo",
         quality: 0.8,
         maxWidth: 800,
         maxHeight: 800,
       });
-      
+
       if (!result.didCancel && result.assets?.length) {
-        const localUri = result.assets[0].uri;
+        let localUri = result.assets[0].uri;
+
+        // ✅ FIXED: Ensure proper file:// prefix on Android
+        if (Platform.OS === "android" && !localUri.startsWith("file://")) {
+          localUri = `file://${localUri}`;
+        }
+
         setProfile({ ...profile, photoURL: localUri });
       }
     } catch (error) {
@@ -128,7 +145,7 @@ export default function ProfileScreen({ navigation }) {
   };
 
   /* =======================
-     SAVE PROFILE TO ASYNC STORAGE
+     SAVE PROFILE TO ASYNC STORAGE + FIREBASE AUTH
   ======================= */
   const handleSaveProfile = async () => {
     // Validation
@@ -137,18 +154,33 @@ export default function ProfileScreen({ navigation }) {
       return;
     }
 
-    if (profile.age && (isNaN(profile.age) || profile.age < 1 || profile.age > 120)) {
+    if (
+      profile.age &&
+      (isNaN(profile.age) || profile.age < 1 || profile.age > 120)
+    ) {
       Alert.alert("⚠️ Validation Error", "Please enter a valid age (1-120)");
       return;
     }
 
-    if (profile.height && (isNaN(profile.height) || profile.height < 50 || profile.height > 300)) {
-      Alert.alert("⚠️ Validation Error", "Please enter a valid height (50-300 cm)");
+    if (
+      profile.height &&
+      (isNaN(profile.height) || profile.height < 50 || profile.height > 300)
+    ) {
+      Alert.alert(
+        "⚠️ Validation Error",
+        "Please enter a valid height (50-300 cm)"
+      );
       return;
     }
 
-    if (profile.weight && (isNaN(profile.weight) || profile.weight < 20 || profile.weight > 500)) {
-      Alert.alert("⚠️ Validation Error", "Please enter a valid weight (20-500 kg)");
+    if (
+      profile.weight &&
+      (isNaN(profile.weight) || profile.weight < 20 || profile.weight > 500)
+    ) {
+      Alert.alert(
+        "⚠️ Validation Error",
+        "Please enter a valid weight (20-500 kg)"
+      );
       return;
     }
 
@@ -165,21 +197,32 @@ export default function ProfileScreen({ navigation }) {
 
       const goals = calculateGoals(cleanedProfile);
 
+      // ✅ ADDED: Sync name to Firebase Auth so HomeScreen stays in sync
+      const currentUser = auth().currentUser;
+      if (currentUser && profile.name.trim()) {
+        try {
+          await currentUser.updateProfile({
+            displayName: profile.name.trim(),
+          });
+        } catch (firebaseErr) {
+          // Non-fatal: AsyncStorage will still have the correct name
+          console.warn("Firebase displayName update failed:", firebaseErr);
+        }
+      }
+
       /* ---------- SAVE TO ASYNC STORAGE ---------- */
       await AsyncStorage.setItem("userProfile", JSON.stringify(cleanedProfile));
       await AsyncStorage.setItem("nutritionGoals", JSON.stringify(goals));
 
       setSaving(false);
       Alert.alert(
-        "✅ Success", 
+        "✅ Success",
         "Profile & goals saved successfully!\n\n" +
-        `📊 Your Daily Goals:\n` +
-        `🔥 Calories: ${goals.calorieGoal} kcal\n` +
-        `💪 Protein: ${goals.proteinGoal}g\n` +
-        `💧 Water: ${goals.waterGoal}ml`,
-        [
-          { text: "🎉 Great!", onPress: () => navigation.goBack() }
-        ]
+          `📊 Your Daily Goals:\n` +
+          `🔥 Calories: ${goals.calorieGoal} kcal\n` +
+          `💪 Protein: ${goals.proteinGoal}g\n` +
+          `💧 Water: ${goals.waterGoal}ml`,
+        [{ text: "🎉 Great!", onPress: () => navigation.goBack() }]
       );
     } catch (err) {
       console.error(err);
@@ -203,10 +246,12 @@ export default function ProfileScreen({ navigation }) {
           onPress={() => setProfile({ ...profile, gender: "male" })}
         >
           <Text style={styles.genderEmoji}>👨</Text>
-          <Text style={[
-            styles.genderText,
-            profile.gender === "male" && styles.genderTextActive
-          ]}>
+          <Text
+            style={[
+              styles.genderText,
+              profile.gender === "male" && styles.genderTextActive,
+            ]}
+          >
             Male
           </Text>
         </TouchableOpacity>
@@ -219,10 +264,12 @@ export default function ProfileScreen({ navigation }) {
           onPress={() => setProfile({ ...profile, gender: "female" })}
         >
           <Text style={styles.genderEmoji}>👩</Text>
-          <Text style={[
-            styles.genderText,
-            profile.gender === "female" && styles.genderTextActive
-          ]}>
+          <Text
+            style={[
+              styles.genderText,
+              profile.gender === "female" && styles.genderTextActive,
+            ]}
+          >
             Female
           </Text>
         </TouchableOpacity>
@@ -238,8 +285,18 @@ export default function ProfileScreen({ navigation }) {
       <Text style={styles.label}>🎯 Fitness Goal</Text>
       <View style={styles.goalContainer}>
         {[
-          { value: "weight loss", emoji: "🔥", label: "Weight Loss", icon: "trending-down" },
-          { value: "muscle gain", emoji: "💪", label: "Muscle Gain", icon: "trending-up" },
+          {
+            value: "weight loss",
+            emoji: "🔥",
+            label: "Weight Loss",
+            icon: "trending-down",
+          },
+          {
+            value: "muscle gain",
+            emoji: "💪",
+            label: "Muscle Gain",
+            icon: "trending-up",
+          },
           { value: "maintain", emoji: "⚖️", label: "Maintain", icon: "minus" },
         ].map((goal) => (
           <TouchableOpacity
@@ -251,16 +308,20 @@ export default function ProfileScreen({ navigation }) {
             onPress={() => setProfile({ ...profile, fitnessGoal: goal.value })}
           >
             <Text style={styles.goalEmoji}>{goal.emoji}</Text>
-            <Text style={[
-              styles.goalText,
-              profile.fitnessGoal === goal.value && styles.goalTextActive
-            ]}>
+            <Text
+              style={[
+                styles.goalText,
+                profile.fitnessGoal === goal.value && styles.goalTextActive,
+              ]}
+            >
               {goal.label}
             </Text>
-            <Icon 
-              name={goal.icon} 
-              size={20} 
-              color={profile.fitnessGoal === goal.value ? "#fff" : "#667eea"} 
+            <Icon
+              name={goal.icon}
+              size={20}
+              color={
+                profile.fitnessGoal === goal.value ? "#fff" : "#667eea"
+              }
             />
           </TouchableOpacity>
         ))}
@@ -272,19 +333,28 @@ export default function ProfileScreen({ navigation }) {
      DIETARY PREFERENCES SELECTION
   ======================= */
   const renderDietaryPreferences = () => {
-    const preferences = ["🥗 Vegetarian", "🌱 Vegan", "🥩 Keto", "🍖 Paleo", "🌾 Gluten-Free", "🥛 Lactose-Free"];
-    const selectedPrefs = profile.dietaryPreferences ? profile.dietaryPreferences.split(", ") : [];
+    const preferences = [
+      "🥗 Vegetarian",
+      "🌱 Vegan",
+      "🥩 Keto",
+      "🍖 Paleo",
+      "🌾 Gluten-Free",
+      "🥛 Lactose-Free",
+    ];
+    const selectedPrefs = profile.dietaryPreferences
+      ? profile.dietaryPreferences.split(", ")
+      : [];
 
     const togglePreference = (pref) => {
       const prefWithoutEmoji = pref.substring(pref.indexOf(" ") + 1);
       let updated;
-      
-      if (selectedPrefs.some(p => p.includes(prefWithoutEmoji))) {
-        updated = selectedPrefs.filter(p => !p.includes(prefWithoutEmoji));
+
+      if (selectedPrefs.some((p) => p.includes(prefWithoutEmoji))) {
+        updated = selectedPrefs.filter((p) => !p.includes(prefWithoutEmoji));
       } else {
         updated = [...selectedPrefs, pref];
       }
-      
+
       setProfile({ ...profile, dietaryPreferences: updated.join(", ") });
     };
 
@@ -294,8 +364,10 @@ export default function ProfileScreen({ navigation }) {
         <View style={styles.preferencesContainer}>
           {preferences.map((pref) => {
             const prefWithoutEmoji = pref.substring(pref.indexOf(" ") + 1);
-            const isSelected = selectedPrefs.some(p => p.includes(prefWithoutEmoji));
-            
+            const isSelected = selectedPrefs.some((p) =>
+              p.includes(prefWithoutEmoji)
+            );
+
             return (
               <TouchableOpacity
                 key={pref}
@@ -305,10 +377,12 @@ export default function ProfileScreen({ navigation }) {
                 ]}
                 onPress={() => togglePreference(pref)}
               >
-                <Text style={[
-                  styles.preferenceText,
-                  isSelected && styles.preferenceTextActive
-                ]}>
+                <Text
+                  style={[
+                    styles.preferenceText,
+                    isSelected && styles.preferenceTextActive,
+                  ]}
+                >
                   {pref}
                 </Text>
                 {isSelected && (
@@ -327,9 +401,7 @@ export default function ProfileScreen({ navigation }) {
   ======================= */
   const renderInputField = (field) => (
     <View key={field.key} style={styles.fieldContainer}>
-      <Text style={styles.label}>
-        {field.label}
-      </Text>
+      <Text style={styles.label}>{field.label}</Text>
       <View style={styles.inputContainer}>
         <TextInput
           value={String(profile[field.key] || "")}
@@ -340,9 +412,7 @@ export default function ProfileScreen({ navigation }) {
           placeholderTextColor="#999"
           autoCapitalize={field.autoCapitalize || "sentences"}
         />
-        {field.unit && (
-          <Text style={styles.unitText}>{field.unit}</Text>
-        )}
+        {field.unit && <Text style={styles.unitText}>{field.unit}</Text>}
       </View>
     </View>
   );
@@ -353,7 +423,10 @@ export default function ProfileScreen({ navigation }) {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <LinearGradient colors={["#667eea", "#764ba2"]} style={styles.loadingGradient}>
+        <LinearGradient
+          colors={["#667eea", "#764ba2"]}
+          style={styles.loadingGradient}
+        >
           <ActivityIndicator size="large" color="#fff" />
           <Text style={styles.loadingText}>⏳ Loading profile...</Text>
         </LinearGradient>
@@ -365,19 +438,22 @@ export default function ProfileScreen({ navigation }) {
      UI
   ======================= */
   return (
-    <KeyboardAvoidingView 
+    <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       style={styles.container}
     >
       <StatusBar barStyle="light-content" backgroundColor="#667eea" />
-      
-      <ScrollView 
+
+      <ScrollView
         contentContainerStyle={styles.scrollContainer}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <LinearGradient colors={["#667eea", "#764ba2"]} style={styles.header}>
-          <TouchableOpacity 
+        <LinearGradient
+          colors={["#667eea", "#764ba2"]}
+          style={styles.header}
+        >
+          <TouchableOpacity
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
@@ -390,7 +466,7 @@ export default function ProfileScreen({ navigation }) {
           <View style={styles.backButton} />
         </LinearGradient>
 
-        <Animated.View 
+        <Animated.View
           style={[
             styles.contentContainer,
             {
@@ -401,24 +477,28 @@ export default function ProfileScreen({ navigation }) {
         >
           {/* Avatar Section */}
           <View style={styles.avatarSection}>
-            <TouchableOpacity 
-              onPress={pickImage} 
+            <TouchableOpacity
+              onPress={pickImage}
               style={styles.avatarContainer}
               activeOpacity={0.8}
             >
               {profile.photoURL ? (
-                <Image source={{ uri: profile.photoURL }} style={styles.avatar} />
+                <Image
+                  // ✅ FIXED: Force cache reload so updated image shows immediately
+                  source={{ uri: profile.photoURL, cache: "reload" }}
+                  style={styles.avatar}
+                />
               ) : (
-                <LinearGradient 
-                  colors={["#667eea", "#764ba2"]} 
+                <LinearGradient
+                  colors={["#667eea", "#764ba2"]}
                   style={styles.avatarPlaceholder}
                 >
                   <Text style={styles.avatarPlaceholderEmoji}>👤</Text>
                 </LinearGradient>
               )}
-              
-              <LinearGradient 
-                colors={["#667eea", "#764ba2"]} 
+
+              <LinearGradient
+                colors={["#667eea", "#764ba2"]}
                 style={styles.cameraButton}
               >
                 <Text style={styles.cameraEmoji}>📷</Text>
@@ -435,29 +515,29 @@ export default function ProfileScreen({ navigation }) {
                 <Text style={styles.sectionEmoji}>📋</Text>
                 <Text style={styles.sectionTitle}>Personal Information</Text>
               </View>
-              
+
               {[
-                { 
-                  label: "👤 Full Name", 
-                  key: "name", 
+                {
+                  label: "👤 Full Name",
+                  key: "name",
                   icon: "account",
-                  placeholder: "Enter your full name"
+                  placeholder: "Enter your full name",
                 },
-                { 
-                  label: "📧 Email", 
-                  key: "email", 
+                {
+                  label: "📧 Email",
+                  key: "email",
                   icon: "email",
                   placeholder: "your@email.com",
                   keyboard: "email-address",
-                  autoCapitalize: "none"
+                  autoCapitalize: "none",
                 },
-                { 
-                  label: "🎂 Age", 
-                  key: "age", 
+                {
+                  label: "🎂 Age",
+                  key: "age",
                   keyboard: "numeric",
                   icon: "cake-variant",
                   placeholder: "25",
-                  unit: "years"
+                  unit: "years",
                 },
               ].map(renderInputField)}
             </View>
@@ -468,23 +548,23 @@ export default function ProfileScreen({ navigation }) {
                 <Text style={styles.sectionEmoji}>📏</Text>
                 <Text style={styles.sectionTitle}>Body Metrics</Text>
               </View>
-              
+
               {[
-                { 
-                  label: "📏 Height", 
-                  key: "height", 
+                {
+                  label: "📏 Height",
+                  key: "height",
                   keyboard: "numeric",
                   icon: "human-male-height",
                   placeholder: "175",
-                  unit: "cm"
+                  unit: "cm",
                 },
-                { 
-                  label: "⚖️ Weight", 
-                  key: "weight", 
+                {
+                  label: "⚖️ Weight",
+                  key: "weight",
                   keyboard: "numeric",
                   icon: "weight-kilogram",
                   placeholder: "70",
-                  unit: "kg"
+                  unit: "kg",
                 },
               ].map(renderInputField)}
 
@@ -497,21 +577,21 @@ export default function ProfileScreen({ navigation }) {
                 <Text style={styles.sectionEmoji}>🎯</Text>
                 <Text style={styles.sectionTitle}>Goals & Preferences</Text>
               </View>
-              
+
               {renderFitnessGoalSelector()}
               {renderDietaryPreferences()}
             </View>
           </View>
 
           {/* Save Button */}
-          <TouchableOpacity 
-            style={[styles.button, saving && styles.buttonDisabled]} 
+          <TouchableOpacity
+            style={[styles.button, saving && styles.buttonDisabled]}
             onPress={handleSaveProfile}
             disabled={saving}
             activeOpacity={0.8}
           >
-            <LinearGradient 
-              colors={saving ? ["#999", "#777"] : ["#667eea", "#764ba2"]} 
+            <LinearGradient
+              colors={saving ? ["#999", "#777"] : ["#667eea", "#764ba2"]}
               style={styles.buttonGradient}
             >
               {saving ? (
@@ -530,23 +610,25 @@ export default function ProfileScreen({ navigation }) {
 
           {/* Info Cards */}
           <View style={styles.infoCardsContainer}>
-            <LinearGradient 
-              colors={["#f0f0ff", "#fff"]} 
+            <LinearGradient
+              colors={["#f0f0ff", "#fff"]}
               style={styles.infoCard}
             >
               <Text style={styles.infoEmoji}>🔒</Text>
               <Text style={styles.infoText}>
-                Your profile data is securely stored on your device and never shared.
+                Your profile data is securely stored on your device and never
+                shared.
               </Text>
             </LinearGradient>
 
-            <LinearGradient 
-              colors={["#fff7ed", "#fff"]} 
+            <LinearGradient
+              colors={["#fff7ed", "#fff"]}
               style={styles.infoCard}
             >
               <Text style={styles.infoEmoji}>💡</Text>
               <Text style={styles.infoText}>
-                Complete your profile to get personalized nutrition goals and recommendations.
+                Complete your profile to get personalized nutrition goals and
+                recommendations.
               </Text>
             </LinearGradient>
           </View>
